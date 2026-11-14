@@ -10,5 +10,7 @@ $s.TargetPath = $target
 $s.WorkingDirectory = $root
 $s.WindowStyle = 7   # minimized console; the UI opens in its own window
 $s.Description = 'SleepPilot - Plan. Build. Verify. Sleep.'
+$icon = Join-Path $root 'ui\icon.ico'
+if (Test-Path $icon) { $s.IconLocation = "$icon,0" }
 $s.Save()
 Write-Output "Shortcut created: $lnk"

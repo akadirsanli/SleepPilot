@@ -9,13 +9,16 @@
 A local-first supervisor that runs **Claude Code, Codex, OpenCode — or any CLI agent —**
 overnight, and only marks a task done when the checks actually pass.
 
+<a href="https://github.com/akadirsanli/SleepPilot/archive/refs/heads/main.zip"><img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20Download-SleepPilot%20ZIP-6ee7c8?style=for-the-badge" alt="Download SleepPilot (ZIP)"></a>
+<a href="#-quick-start"><img src="https://img.shields.io/badge/%E2%9A%A1%20Quick%20start-60%20seconds-93b4ff?style=for-the-badge" alt="Quick start in 60 seconds"></a>
+
 [![GitHub stars](https://img.shields.io/github/stars/akadirsanli/SleepPilot?style=social)](https://github.com/akadirsanli/SleepPilot/stargazers)
-[![tests](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml/badge.svg)](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml)
+[![tests](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Node.js 20.10+](https://img.shields.io/badge/node-%3E%3D20.10-339933?logo=node.js&logoColor=white)](package.json)
 [![runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-blue)](package.json)
 
-[**Quick start**](#-60-second-quick-start) · [How a night works](#-what-happens-while-you-sleep) · [Engines](#-bring-the-agent-you-already-trust) · [Reverse & Rust](#-sleep--reverse--rust-it) · [Docs](#-documentation)
+[**Quick start**](#-quick-start) · [How a night works](#-what-happens-while-you-sleep) · [Engines](#-bring-the-agent-you-already-trust) · [Reverse & Rust](#-sleep--reverse--rust-it) · [Docs](#-documentation)
 
 </div>
 
@@ -63,25 +66,39 @@ Six engine types, per-role routing, local AI via Ollama. No build step, no
 </tr>
 </table>
 
-## ⚡ 60-second quick start
+## ⚡ Quick start
+
+**No install step, no build step, zero runtime dependencies.** You only need
+[Node.js 20.10 or newer](https://nodejs.org/) (the LTS version is perfect).
+
+### 🪟 Windows — no terminal needed
+
+1. **Install Node.js** from [nodejs.org](https://nodejs.org/) (just click *Next* through the installer).
+2. **[⬇️ Download SleepPilot (ZIP)](https://github.com/akadirsanli/SleepPilot/archive/refs/heads/main.zip)**,
+   right-click the file → **Extract All…**
+3. Open the extracted folder and **double-click `SleepPilot.cmd`**.
+   If Windows asks whether to run it, choose **Run** — it is a short plain-text
+   script you can read in Notepad.
+4. Your browser opens SleepPilot. 🎉
+
+The first launch also puts a **SleepPilot** shortcut with the moon logo next to
+`SleepPilot.cmd`. Want one on your desktop too? Run
+`powershell -ExecutionPolicy Bypass -File scripts\create-shortcut.ps1` once.
+
+### 💻 macOS, Linux or terminal fans
 
 ```sh
 git clone https://github.com/akadirsanli/SleepPilot.git
 cd SleepPilot
-npm start
+npm start          # or ./sleeppilot.sh
 ```
 
-That's it — **no install step, no build step**. The UI opens on `127.0.0.1`.
+### 🧪 Look around for free
 
-Want to look around before spending a single token?
-
-```sh
-npm run start:test-mode
-```
-
-Test mode drives simulated engines, is clearly labelled, and keeps its data apart
-from your real projects. On Windows you can also double-click `SleepPilot.cmd`;
-on macOS/Linux run `./sleeppilot.sh`.
+Want to explore before spending a single token? Start in test mode —
+`SleepPilot.cmd --test-mode` on Windows or `npm run start:test-mode` anywhere.
+It drives simulated engines, is clearly labelled, and keeps its data apart from
+your real projects.
 
 ## 🌙 What happens while you sleep
 
