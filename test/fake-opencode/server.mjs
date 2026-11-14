@@ -33,6 +33,10 @@ if (!password) {
 const expectedAuth = 'Basic ' + Buffer.from('opencode:' + password).toString('base64');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STEP_MS = Number(process.env.SLEEPPILOT_FAKE_STEP_MS || 60);
+// Optional reviewer latency for tests that must prove reviews overlap: SLEEPPILOT_FAKE_REVIEW_MS,
+// limited to review prompts matching the SLEEPPILOT_FAKE_REVIEW_MATCH regex when that is set.
+const REVIEW_MS = Number(process.env.SLEEPPILOT_FAKE_REVIEW_MS || 0);
+const REVIEW_MATCH = process.env.SLEEPPILOT_FAKE_REVIEW_MATCH ? new RegExp(process.env.SLEEPPILOT_FAKE_REVIEW_MATCH) : null;
 
 const sessions = new Map();
 let startup503 = Number(process.env.SLEEPPILOT_FAKE_STARTUP_503 || 0);
@@ -258,7 +262,10 @@ async function execute(session) {
       if (/SleepPilot model check/.test(text)) reply = 'OK';
       else if (/FACTS MEASURED BY SLEEPPILOT/.test(text)) reply = `FAKE closing report (test double).\n${(text.match(/Net change since the run started: [^\n]*/) || [''])[0]}`;
       else if (/You are the MANAGER/.test(text) || /could not be parsed/.test(text)) reply = managerReply(text, session);
-      else if (/You are the REVIEWER/.test(text)) reply = reviewerReply();
+      else if (/You are the REVIEWER/.test(text)) {
+        if (REVIEW_MS && (!REVIEW_MATCH || REVIEW_MATCH.test(text))) await sleep(REVIEW_MS);
+        reply = reviewerReply();
+      }
       else reply = await runDeveloper(session, text, ctx);
     } catch (err) {
       error = err.structured || { type: 'unknown', message: err.message };

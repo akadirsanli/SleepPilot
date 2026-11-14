@@ -19,6 +19,10 @@ test('parallel developers: file-disjoint tasks run at the same time, each may ed
   );
   const counter = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sp-count-')), 'count.txt');
   process.env.SP_COUNT = counter;
+  // The two wave reviews each take a few seconds in the fake server, so "reviewed at the same time"
+  // is a clear overlap that does not depend on how fast the CI runner finishes each task's checks.
+  process.env.SLEEPPILOT_FAKE_REVIEW_MS = '4000';
+  process.env.SLEEPPILOT_FAKE_REVIEW_MATCH = 'UI chart|Kervan motoru';
   const app = await makeApp();
   try {
     const p = await newProject(app, project, {
@@ -49,10 +53,13 @@ test('parallel developers: file-disjoint tasks run at the same time, each may ed
     const reviews = (await app.getTurns(p.id, run.id)).filter((t) => t.role === 'reviewer' && [a.n, b.n].includes(t.iteration));
     assert.equal(reviews.length, 2, 'both wave tasks reviewed');
     assert.notEqual(reviews[0].sessionID, reviews[1].sessionID);
-    assert.ok(Math.abs(reviews[0].startedAt - reviews[1].startedAt) < 1500, 'reviews started together');
+    const [r1, r2] = reviews;
+    assert.ok(Math.max(r1.startedAt, r2.startedAt) < Math.min(r1.endedAt, r2.endedAt), `reviews overlapped in time: ${JSON.stringify(reviews.map((r) => [r.startedAt, r.endedAt]))}`);
     assert.ok(elapsed < 20_000, `took ${elapsed} ms`);
   } finally {
     await app.shutdown();
     delete process.env.SP_COUNT;
+    delete process.env.SLEEPPILOT_FAKE_REVIEW_MS;
+    delete process.env.SLEEPPILOT_FAKE_REVIEW_MATCH;
   }
 });
