@@ -1,160 +1,69 @@
 <div align="center">
 
+<img src="docs/screenshots/hero.gif" alt="SleepPilot: from a one-line objective at 23:00 to verified, evidence-backed work at 07:00" width="100%">
+
 # SleepPilot
 
-### Plan. Build. Verify. Sleep.
+### Your AI coding agent works the night shift. You wake up to proof.
 
+A local-first supervisor that runs **Claude Code, Codex, OpenCode — or any CLI agent —**
+overnight, and only marks a task done when the checks actually pass.
+
+[![GitHub stars](https://img.shields.io/github/stars/akadirsanli/SleepPilot?style=social)](https://github.com/akadirsanli/SleepPilot/stargazers)
 [![tests](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml/badge.svg)](https://github.com/akadirsanli/SleepPilot/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Node.js 20.10+](https://img.shields.io/badge/node-%3E%3D20.10-339933?logo=node.js&logoColor=white)](package.json)
 [![runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-blue)](package.json)
 
-**Describe the outcome. Go to sleep. Wake up to evidence.**
-
-SleepPilot is a local-first autonomous engineering harness for real repositories.
-It plans the work, drives an AI coding engine, runs the checks, asks a reviewer,
-recovers from failures, and leaves you a report — instead of leaving you
-babysitting a chat window.
-
-[Quick start](#quick-start) · [Why SleepPilot](#why-sleeppilot) · [Multi-harness routing](#multi-harness-routing) · [Documentation](#documentation)
+[**Quick start**](#-60-second-quick-start) · [How a night works](#-what-happens-while-you-sleep) · [Engines](#-bring-the-agent-you-already-trust) · [Reverse & Rust](#-sleep--reverse--rust-it) · [Docs](#-documentation)
 
 </div>
 
-<p align="center">
-  <img src="docs/screenshots/demo.gif" alt="SleepPilot product tour: home, project setup, live run and Reverse & Rust" width="960">
-</p>
+---
 
-## Why SleepPilot
+Coding agents are brilliant at *sounding* finished. Then you open the repo in the
+morning and find a half-applied patch, a crashed session and a chat window that
+says “All done! ✅”.
 
-Most coding agents are good at producing a convincing answer. SleepPilot is built
-around a harder question: **can it prove the work is actually done?**
+**SleepPilot is the supervisor those agents never had.** It plans the work, hands
+one concrete task at a time to the engine you already use — Claude Code, Codex,
+OpenCode, any OpenAI-compatible API, a local Ollama model or your own CLI — runs
+real checks, gets a read-only second opinion, repairs what failed and keeps going
+until the objective is met or the clock runs out.
 
-- **Evidence beats “done”.** A task becomes **verified** only when checks
-  SleepPilot actually executed passed after the change. Model self-reports are
-  recorded as claims, never as evidence.
-- **It keeps going when things go wrong.** Provider errors, quota exhaustion,
-  crashes, frozen turns and app restarts are expected states, not reasons to
-  lose the night.
-- **Use the harness you already trust.** OpenCode, Claude Code, Codex, a
-  built-in API harness, DeepSeek Harness or any command-line agent can execute
-  the work.
-- **Route the work intelligently.** Pin a different engine, model and reasoning
-  effort for the Manager, Developer and Reviewer. If one route is exhausted,
-  SleepPilot can continue on another without losing the task.
-- **Designed for real repositories.** File-scoped parallel developers, protected
-  paths, snapshots, backups, command checks and a read-only reviewer are part of
-  the workflow, not an afterthought.
-- **No build step. No runtime dependencies.** Node.js and this repository are
-  enough.
+Then it leaves you a report built from things it actually executed.
 
-> **Verified means verified.** “The model said it finished” is not verification.
-> SleepPilot wants a passing check, a real file change and a reviewer that has
-> seen the evidence.
+> **“The model said it finished” is not verification.**
+> A task is marked **verified** only when a check SleepPilot itself ran passed
+> after the change.
 
-## A night with SleepPilot
+<table>
+<tr>
+<td width="33%" valign="top">
 
-```
-objective
-   │
-   ▼
-Manager ──► plan + scope
-   │
-   ▼
-Developer ──► real edits + tools
-   │
-   ▼
-Checks ──► snapshots, commands, syntax, HTML, cargo
-   │
-   ▼
-Reviewer ──► read-only second opinion
-   │
-   ▼
-Manager ──► continue / repair / finish
-   │
-   └──────────────► repeat until the objective is done or the clock runs out
-```
+### 🧪 Evidence, not vibes
+Command checks, syntax, headless-browser HTML smoke tests, `cargo test`, file:line
+citations. Model self-reports are recorded as **claims**, never as proof.
 
-Every turn is durable. Every iteration leaves evidence. Every unexpected failure
-gets a recovery path.
+</td>
+<td width="33%" valign="top">
 
-![Live run screen](docs/screenshots/run.png)
+### 🌙 Built to survive the night
+Stall watchdog, crash supervisor, memory guard, durable sessions and quota-aware
+fallback. Failures become recovery paths, not a lost night.
 
-## What you can throw at it
+</td>
+<td width="33%" valign="top">
 
-- **A feature in an existing app.** “Add CSV export to the active table, keep the
-  existing UI style, and verify it with the project’s tests.”
-- **A failing test or a stubborn bug.** Give SleepPilot the failure; it plans a
-  repair and keeps the change scoped.
-- **A migration or refactor.** Parallel developers work only on tasks whose file
-  scopes do not overlap.
-- **A Reverse & Rust project.** Analyse a program you are authorized to inspect,
-  build an evidence-backed dossier and specification, then reimplement it in Rust
-  in a separate workspace.
-- **A headless job from another tool.** The same orchestrator is available through
-  `sleeppilot run`, `ask`, `route` and `reverse` with NDJSON output and stable
-  exit codes.
+### 🔌 Zero lock-in, zero dependencies
+Six engine types, per-role routing, local AI via Ollama. No build step, no
+`npm install`, no runtime dependencies — just Node.js.
 
-## Six engines, one supervisor
+</td>
+</tr>
+</table>
 
-| Engine | Uses | Credential | Best for |
-|---|---|---|---|
-| **OpenCode 2.x** | A private loopback `opencode serve` process | Reuses your OpenCode sign-in; no key enters SleepPilot | Existing OpenCode users and its tools |
-| **Claude Code** | Installed `claude` CLI, stream-json, sessions | Reuses `claude auth login` | Claude Code users, MCP/tools |
-| **Codex CLI** | `codex exec --json` + resume | Reuses `codex login` | Codex users and its sandbox |
-| **API harness** | OpenAI-compatible or Anthropic HTTP APIs | Your key, stored locally | DeepSeek, OpenAI, OpenRouter, Groq, Mistral, xAI, LM Studio, vLLM |
-| **DeepSeek Harness** | Local `dsh --profile headless` | DSH’s credentials | Teams already using DSH |
-| **Command harness** | Any command that accepts a prompt | Whatever the command needs | In-house or experimental agents |
-
-**Local AI works too.** Settings → Local AI detects Ollama, lists your local
-models and creates a provider in one click — no cloud key required.
-
-## Multi-harness routing
-
-SleepPilot 2.4 can treat several harnesses as one delegation layer.
-
-```js
-// project.settings
-{
-  rolePins: {
-    manager:   { harness: 'claude', modelProfile: 'careful' },
-    developer: { harness: 'dsh',    modelProfile: 'fast' },
-    reviewer:  { harness: 'api',    modelProfile: 'deep-review' }
-  },
-  modelProfiles: {
-    claude: { careful:     { model: 'sonnet', effort: 'high' } },
-    dsh:    { fast:        { model: null,     effort: null   } },
-    api:    { 'deep-review': { model: { providerID: 'deepseek', id: 'deepseek-chat' }, effort: 'high' } }
-  },
-  harnessRouting: {
-    enabled: true,
-    fallbackChain: ['claude', 'dsh', 'api', 'opencode'],
-    claudeWindowHours: 5,
-    workingWindowHours: 10
-  }
-}
-```
-
-- **Real effort, not a label.** API profiles support `off`, `none`, `minimal`,
-  `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; Claude Code supports its
-  actual `--effort` values; Codex uses `model_reasoning_effort`.
-- **Read-only review at the adapter level.** Manager, Reviewer, closing and
-  preflight sessions are restricted to harnesses that can actually enforce it.
-- **Quota-aware fallback.** Claude’s 5-hour exhaustion is detected from its
-  stream/result output. The failed turn is recorded, the next usable route is
-  selected, and the same task continues. A long working window does not end just
-  because one harness hit a limit.
-- **Loud failures.** Unsupported effort or a harness that cannot enforce
-  read-only is rejected with the supported values in the error — never silently
-  downgraded.
-
-Detailed schema, effort vocabulary and fallback semantics:
-**[docs/ROUTING.md](docs/ROUTING.md)**.
-
-## Quick start
-
-**Requirements:** Node.js **20.10+**. Nothing else is required to open the UI.
-Optional tools unlock more engines and checks: OpenCode 2.x, Claude Code, Codex,
-Ollama, Rust, Git, GitHub CLI and Microsoft Edge.
+## ⚡ 60-second quick start
 
 ```sh
 git clone https://github.com/akadirsanli/SleepPilot.git
@@ -162,84 +71,184 @@ cd SleepPilot
 npm start
 ```
 
-On Windows you can also run:
+That's it — **no install step, no build step**. The UI opens on `127.0.0.1`.
 
-```bat
-.\SleepPilot.cmd
-```
-
-On macOS/Linux:
+Want to look around before spending a single token?
 
 ```sh
-./sleeppilot.sh
+npm run start:test-mode
 ```
 
-There is **no install step** and **no build step**. SleepPilot has zero runtime
-dependencies.
+Test mode drives simulated engines, is clearly labelled, and keeps its data apart
+from your real projects. On Windows you can also double-click `SleepPilot.cmd`;
+on macOS/Linux run `./sleeppilot.sh`.
 
-Try the full interface without spending model usage:
+## 🌙 What happens while you sleep
 
-```bat
-.\SleepPilot.cmd --test-mode
+```
+ 23:00  You write the objective ─────────────────────────────────────────┐
+          │                                                              │
+          ▼                                                              │
+   Scout   ─► measures the repo, detects the stack, suggests checks      │
+   Manager ─► turns the objective into scoped tasks                      │
+   Developer ─► real edits with real tools (parallel when scopes allow)  │  repeat until
+   Checks  ─► commands · syntax · HTML smoke · cargo · citations         │  done or
+   Reviewer ─► read-only second opinion on the evidence                  │  out of time
+   Manager ─► continue · repair · finish ────────────────────────────────┘
+          │
+ 07:00  ▼  Report: changed files, executed checks, verdicts, tokens, open issues
 ```
 
-The test mode uses simulated engines and is clearly labelled. It keeps its data
-separate from your real projects.
+Every turn is durable. Every iteration leaves evidence. Every unexpected failure
+gets a recovery path.
 
-All real data — projects, runs, reports, backups and logs — lives under
-`%LOCALAPPDATA%\SleepPilot` on Windows or `~/.local/share/SleepPilot` elsewhere.
-SleepPilot does not write run data into your project folder; the agent edits the
-project only when you give it a task.
+<p align="center">
+  <img src="docs/screenshots/run.png" alt="Live run: a failed check, an automatic repair and a verified result" width="900">
+  <br><sub>A real run: the first patch fails an exact-content check, the Developer fixes it, the check passes, the Manager closes the task.</sub>
+</p>
 
-## Your first run
+## 🎯 Who is this for?
 
-1. **Connect an engine.** Settings → Engines: connect OpenCode, Claude Code or
-   Codex, add an API key, configure DSH, or use Local AI with Ollama.
-2. **Create a project.** Home → New project: choose the folder and, optionally,
-   the Rust reverse-engineering template.
-3. **Read the scope report.** SleepPilot measures the project, suggests a
-   realistic time limit, iteration count and parallelism, and Scout identifies
-   the stack, tools and likely checks.
-4. **Write the objective.** Say what “done” looks like, including constraints and
-   acceptance criteria. Pick a preset: Overnight, Supervised, Strict or
-   Unrestricted.
-5. **Start the run and go to sleep.** Approve unfamiliar permissions if you are
-   watching; use Sleep mode if you are not.
-6. **Read the report.** Changed files, executed checks, reviewer verdicts,
-   decisions, token usage and open issues — measured, not guessed.
+- You use **Claude Code, Codex or OpenCode** and want to hand it a job at night
+  and find **verified results** in the morning.
+- You pay for **several models or harnesses** and want to decide which one plans,
+  which one codes and which one reviews — with automatic fallback when one runs
+  out of quota.
+- You're **tired of agents saying “done”** while the tests are still failing.
+- You want all of this **local-first**: your machine, your keys, your repo.
 
-![Project screen](docs/screenshots/project.png)
+## 🆚 Why not just run Claude Code or Codex directly?
 
-## Headless use
+| | A coding agent on its own | **SleepPilot + that same agent** |
+|---|---|---|
+| Unattended overnight | You babysit it | Designed for it: Sleep presets, stall watchdog, permission timeouts |
+| What “done” means | The model says so | A check SleepPilot ran **passed after the change** |
+| Second opinion | — | Read-only Reviewer sees the evidence |
+| Crash / frozen turn | Night is over | Watchdog + supervisor restart and reconcile |
+| Quota exhausted | Run stops | Next route in the fallback chain continues the **same task** |
+| Big refactors | One long context | File-scoped tasks, parallel developers on non-overlapping scopes |
+| Choice of model | One vendor | Different engine, model and effort per role |
+| Morning | Scroll the chat | A measured report: files, checks, verdicts, tokens |
 
-SleepPilot is also a CLI harness for workflows, cron jobs, CI and other agents.
+SleepPilot doesn't replace your agent — it **supervises** it. Keep the tool you
+like; add the plan, the checks, the reviewer and the recovery around it.
+
+## 🔌 Bring the agent you already trust
+
+| Engine | How SleepPilot drives it | Credentials |
+|---|---|---|
+| **Claude Code** | Installed `claude` CLI, stream-json, sessions | Reuses `claude auth login` |
+| **Codex CLI** | `codex exec --json` + resume | Reuses `codex login` |
+| **OpenCode 2.x** | Private loopback `opencode serve` | Reuses your OpenCode sign-in |
+| **API harness** | OpenAI-compatible or Anthropic HTTP APIs — DeepSeek, OpenAI, OpenRouter, Groq, Mistral, xAI, LM Studio, vLLM | Your key, stored locally |
+| **DeepSeek Harness** | Local `dsh --profile headless` | DSH's own credentials |
+| **Command harness** | Any command that accepts a prompt | Whatever it needs |
+
+**Fully local works too:** Settings → Local AI detects Ollama, lists your models
+and creates a provider in one click. No cloud key required.
+
+### Route each role to the best engine
+
+Pin a different harness, model and reasoning effort to the **Manager**,
+**Developer** and **Reviewer** — and let SleepPilot fall back automatically when a
+route runs out of quota.
+
+```js
+rolePins: {
+  manager:   { harness: 'claude', modelProfile: 'careful' },
+  developer: { harness: 'dsh',    modelProfile: 'fast' },
+  reviewer:  { harness: 'api',    modelProfile: 'deep-review' }
+},
+harnessRouting: {
+  enabled: true,
+  fallbackChain: ['claude', 'dsh', 'api', 'opencode']
+}
+```
+
+<details>
+<summary><b>Routing details: real effort levels, read-only enforcement, loud failures</b></summary>
+
+- **Real effort, not a label.** API profiles support `off`, `none`, `minimal`,
+  `low`, `medium`, `high`, `xhigh`, `max` and `ultra`; Claude Code uses its actual
+  `--effort` values; Codex uses `model_reasoning_effort`.
+- **Read-only review at the adapter level.** Manager, Reviewer, closing and
+  preflight sessions are restricted to harnesses that can actually enforce it.
+- **Quota-aware fallback.** Claude's 5-hour exhaustion is detected from its
+  stream/result output. The failed turn is recorded, the next usable route is
+  selected, and the same task continues.
+- **Loud failures.** Unsupported effort or a harness that cannot enforce
+  read-only is rejected with the supported values in the error — never silently
+  downgraded.
+
+Full schema and fallback semantics: **[docs/ROUTING.md](docs/ROUTING.md)**.
+
+</details>
+
+## 🦀 Sleep & Reverse & Rust It
+
+Point SleepPilot at a program you are authorized to inspect. Overnight it builds a
+read-only mirror, performs binary and text reconnaissance (PE / ELF / Mach-O /
+ZIP), writes a **cited technical dossier**, turns it into an implementation-ready
+**spec with test vectors**, and rebuilds the behaviour as a **Rust application** —
+with `cargo check` and `cargo test` as the evidence.
+
+The target is never modified: it is SHA-1 hashed before and after to prove it.
+
+<p align="center">
+  <img src="docs/screenshots/reverse-rust.png" alt="Sleep & Reverse & Rust It workspace" width="900">
+</p>
+
+## 📸 Tour
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/home.png" alt="Home: engines and projects"><br><sub><b>Home</b> — every engine, every project, one place.</sub></td>
+<td width="50%"><img src="docs/screenshots/project.png" alt="Project: scope report and Scout"><br><sub><b>Scope report</b> — realistic time, iterations and parallelism before you start.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/toolchain.png" alt="Scout and toolchain detection"><br><sub><b>Scout</b> — detects the stack, required tools and checks from your files.</sub></td>
+<td width="50%"><img src="docs/screenshots/local-ai.png" alt="Local AI with Ollama"><br><sub><b>Local AI</b> — Ollama models as a provider in one click.</sub></td>
+</tr>
+</table>
+
+## 🚀 Your first real run
+
+1. **Connect an engine** — Settings → Engines: Claude Code, Codex, OpenCode, an
+   API key, DSH, or Local AI with Ollama.
+2. **Create a project** — Home → New project, pick the folder.
+3. **Read the scope report** — SleepPilot suggests a realistic time limit,
+   iteration count and parallelism; Scout proposes checks.
+4. **Write the objective** — say what “done” looks like. Pick a preset:
+   *Overnight*, *Supervised*, *Strict* or *Unrestricted*.
+5. **Start the run and go to sleep.**
+6. **Read the report** — changed files, executed checks, reviewer verdicts,
+   decisions, token usage and open issues. Measured, not guessed.
+
+All run data lives under `%LOCALAPPDATA%\SleepPilot` (Windows) or
+`~/.local/share/SleepPilot` — never in your project folder. Nothing is committed
+or pushed automatically.
+
+## 🤖 Headless: plug it into CI, cron or other agents
 
 ```sh
-# Run a project autonomously
-node src/main.mjs run --project C:\work\app \
-  --objective "Add CSV export" --hours 8 --preset sleep
+# Run a project autonomously for 8 hours
+sleeppilot run --project ./app --objective "Add CSV export" --hours 8 --preset sleep
 
-# One prompt through an engine
-node src/main.mjs ask --project C:\work\app --engine api \
-  --model deepseek/deepseek-chat --prompt "Fix the failing test" --json
+# One prompt through any engine, NDJSON out
+sleeppilot ask --project ./app --engine api --model deepseek/deepseek-chat \
+  --prompt "Fix the failing test" --json
 
-# Resolve routing without executing anything
-node src/main.mjs route --project C:\work\app --task coding --dry-run --json
-
-# Reverse & Rust
-node src/main.mjs reverse --target C:\games\demo --workspace C:\work\demo-re \
-  --mode rust --goal "Rebuild the save editor" --yes --start
+# Dry-run the routing decision
+sleeppilot route --project ./app --task coding --dry-run --json
 
 # What can this machine do?
-node src/main.mjs engines --connect
-node src/main.mjs doctor --json
+sleeppilot doctor --json
 ```
 
-`npm link` installs the `sleeppilot` command. Every run/ask/turn emits NDJSON
-with `--json`, including `harness`, `modelProfile` and `fallbackStep` on routed
-turns. Exit codes are stable: `0` completed, `2` paused, `3` stopped, `4` failed.
+`npm link` installs the `sleeppilot` command (or use `node src/main.mjs …`).
+Exit codes are stable: `0` completed · `2` paused · `3` stopped · `4` failed.
 
-## Verification, not vibes
+## 🧪 Verification, not vibes
 
 | Evidence | How it is checked |
 |---|---|
@@ -254,46 +263,42 @@ turns. Exit codes are stable: `0` completed, `2` paused, `3` stopped, `4` failed
 Reviewer verdicts and model “done” messages are recorded, but they are **never
 enough** to mark a task verified.
 
-## Sleep mode without the fantasy
+<details>
+<summary><b>🛡️ Safety and privacy by default</b></summary>
 
-The hard part of an overnight run is not starting it. It is keeping it honest
-when nobody is watching.
+SleepPilot drives an agent with real file and shell access. Treat it like a
+powerful automation tool, not a sandbox.
+
+- The UI binds to `127.0.0.1` only, with a per-launch token cookie, Host
+  validation and CSRF protection.
+- API keys live in a local credential store — never in the project or browser.
+- Claude Code, Codex and OpenCode reuse their own logins; SleepPilot never copies
+  their credentials.
+- Manager and Reviewer run read-only where the harness can enforce it.
+- Protected paths and per-task edit scopes limit what a developer may touch.
+- Optional pre-run backups; every persisted string passes through a redactor.
+- Nothing is committed or pushed without an explicit click.
+
+Read [SECURITY.md](SECURITY.md) before running an unrestricted profile.
+
+</details>
+
+<details>
+<summary><b>🌙 How Sleep mode stays honest when nobody is watching</b></summary>
 
 - A **stall watchdog** interrupts turns with no sign of life.
 - A **supervisor** and a **memory guard** restart the app after a crash or before
   V8 runs out of memory.
 - Sessions are durable; after a restart SleepPilot reconciles an in-flight turn
-  from the engine’s records instead of submitting it twice.
+  from the engine's records instead of submitting it twice.
 - Unanswered permissions and questions are closed after a timeout.
 - Quota and provider errors become a controlled pause or a harness switch, not a
   silent failure.
-- Nothing is committed or pushed automatically. GitHub actions require an
-  explicit click.
 
-## Safety and privacy by default
+</details>
 
-SleepPilot drives an agent with real file and shell access. Treat it like a
-powerful automation tool, not a sandbox.
-
-- The UI server binds to `127.0.0.1` only and uses a per-launch token cookie,
-  Host validation and CSRF protection.
-- API keys live in a local credential store, never in the project or the browser.
-- Claude Code, Codex and OpenCode reuse their own logins; SleepPilot does not
-  copy their credentials.
-- Manager and Reviewer run read-only where the harness can enforce it.
-- Protected paths and per-task edit scopes limit what a developer may touch.
-- Pre-run backups are optional; every persisted string passes through a
-  redactor.
-- Reverse-engineering targets are mirrored read-only and re-hashed to prove they
-  were not modified.
-
-Read [SECURITY.md](SECURITY.md) before running an unrestricted profile.
-
-SleepPilot is an independent project. It is **not affiliated with, endorsed by,
-or sponsored by** OpenCode, Anthropic, OpenAI, DeepSeek, Microsoft or any other
-vendor whose CLI or API it can drive.
-
-## Under the hood
+<details>
+<summary><b>🏗️ Under the hood</b></summary>
 
 ```
 UI (vanilla JS, loopback)          CLI / agents / CI
@@ -316,66 +321,65 @@ UI (vanilla JS, loopback)          CLI / agents / CI
 
 The `RunController` is engine-agnostic: it submits turns, reconciles durable
 results, evaluates executed checks, applies manager decisions and survives
-restarts. Architecture details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+restarts. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Documentation
+</details>
 
-| Document | What is inside |
-|---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Install, first run, presets, steering, recovery, CLI |
-| [docs/ENGINES.md](docs/ENGINES.md) | Engine contract, providers, Claude/Codex/DSH setup |
-| [docs/ROUTING.md](docs/ROUTING.md) | Role pins, model profiles, effort, quota fallback |
-| [docs/REVERSE.md](docs/REVERSE.md) | Reverse & Rust: recon, evidence, Rust rules |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | State machine, persistence, security design |
-| [docs/TESTING.md](docs/TESTING.md) | Unit, integration, fake engines and real tests |
-| [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | Known limits and deliberate non-goals |
-| [THIRD_PARTY.md](THIRD_PARTY.md) | Tools and ideas SleepPilot works with |
-| [SECURITY.md](SECURITY.md) | Credential handling, permissions, disclosure |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and contribution rules |
+<details>
+<summary><b>⚖️ Honest limits</b></summary>
 
-## Development
-
-```sh
-node test/run.mjs
-node src/main.mjs --test-mode --no-open --no-supervisor
-```
-
-CI runs the full suite on **Node.js 20, 22 and 24 on Windows**, plus the Rust
-recon/check tests on Ubuntu. The suite uses fake OpenCode, API, DSH, Claude Code
-and Codex servers/CLIs, so it needs no account and spends no usage. Rust tests
-run locally when `cargo` is installed; otherwise the Rust checks report a clear
-“cargo not found” message and the rest of the suite still passes.
-
-Real OpenCode tests are opt-in:
-
-```powershell
-$env:SLEEPPILOT_REAL=1
-node test/run.mjs real
-```
-
-## Honest limits
-
-- A harness that cannot enforce read-only sessions (DSH, the Command harness) is
-  rejected for Manager/Reviewer roles rather than protected by a prompt alone.
-- A harness without a real effort flag rejects effort requests; SleepPilot does
-  not pretend to support them.
-- `workingWindowHours` defines the intended continuous routing window; the run’s
-  own time limit still controls when it ends.
-- Model calls cost whatever your provider charges. SleepPilot reports usage but
+- Harnesses that cannot enforce read-only sessions (DSH, Command harness) are
+  rejected for Manager/Reviewer roles rather than "protected" by a prompt.
+- A harness without a real effort flag rejects effort requests.
+- Model calls cost whatever your provider charges. SleepPilot reports usage; it
   cannot make a paid provider free.
-- Autonomous modes can change files and run commands. Use scoped permissions,
-  protected paths, backups and a version control system you trust.
+- Autonomous modes change files and run commands. Use scoped permissions,
+  protected paths, backups and version control.
 - Reverse & Rust is for targets you are authorized to inspect. You are
   responsible for the target and for how you use the results.
 
-## Contributing
+More in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
-Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md),
-run the suite, and keep changes small and testable.
+</details>
 
-If SleepPilot saves you a night, a star helps other people find it.
+## 📚 Documentation
 
-## License
+| Document | What is inside |
+|---|---|
+| [USAGE](docs/USAGE.md) | Install, first run, presets, steering, recovery, CLI |
+| [ENGINES](docs/ENGINES.md) | Engine contract, providers, Claude/Codex/DSH setup |
+| [ROUTING](docs/ROUTING.md) | Role pins, model profiles, effort, quota fallback |
+| [REVERSE](docs/REVERSE.md) | Reverse & Rust: recon, evidence, Rust rules |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | State machine, persistence, security design |
+| [TESTING](docs/TESTING.md) | Unit, integration, fake engines and real tests |
+| [SECURITY](SECURITY.md) · [CONTRIBUTING](CONTRIBUTING.md) · [THIRD_PARTY](THIRD_PARTY.md) | Policies and credits |
 
-[MIT](LICENSE). See [THIRD_PARTY.md](THIRD_PARTY.md) for tools and ideas this
-project builds on.
+## 🛠️ Development
+
+```sh
+npm test
+node src/main.mjs --test-mode --no-open --no-supervisor
+```
+
+CI runs the full suite on **Node.js 20, 22 and 24 on Windows**, plus Rust
+recon/check tests on Ubuntu. Fake OpenCode, API, DSH, Claude Code and Codex
+servers mean the suite needs no account and spends no usage.
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md),
+run the suite, keep changes small and testable.
+
+---
+
+<div align="center">
+
+### ⭐ If SleepPilot saves you a night, a star helps the next person find it.
+
+SleepPilot is an independent project, **not affiliated with, endorsed by, or
+sponsored by** Anthropic, OpenAI, OpenCode, DeepSeek, Microsoft or any other
+vendor whose CLI or API it can drive.
+
+[MIT](LICENSE) © akadirsanli
+
+</div>
