@@ -1,0 +1,21 @@
+{
+  "summary": "TEST MODE plan (fake manager): a simple HTML page is created in two steps.",
+  "tasks": [
+    {
+      "title": "Create the index.html page",
+      "description": "Create a page titled 'SleepPilot Demo'.\nACTION: write index.html <!doctype html>\\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>SleepPilot Demo</title></head>\\n<body><h1>SleepPilot Demo</h1><p id=\"status\">loading</p><script src=\"app.js\"></script></body></html>\\n\nACTION: write app.js // placeholder\\n",
+      "acceptance": ["index.html opens", "the title is correct"],
+      "priority": 1,
+      "depends_on": []
+    },
+    {
+      "title": "Update the status text with app.js",
+      "description": "Set the #status text to 'ready' when the page loads.\nACTION: write app.js document.getElementById('status').textContent = 'ready';\\n",
+      "acceptance": ["#status shows 'ready'", "no JavaScript errors"],
+      "priority": 2,
+      "depends_on": [1]
+    }
+  ],
+  "verification_notes": "The HTML load check and the JS syntax check can be used.",
+  "questions": []
+}

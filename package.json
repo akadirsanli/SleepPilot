@@ -1,0 +1,63 @@
+{
+  "name": "sleeppilot",
+  "version": "2.4.0",
+  "description": "Autonomous engineering harness with OpenCode, Claude Code, Codex, OpenAI-compatible APIs, DeepSeek Harness and custom CLIs; Scout toolchain detection, evidence-based verification, multi-project runs, GitHub publishing and Sleep & Reverse & Rust It.",
+  "license": "MIT",
+  "author": "akadirsanli",
+  "type": "module",
+  "main": "src/main.mjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akadirsanli/SleepPilot.git"
+  },
+  "homepage": "https://github.com/akadirsanli/SleepPilot#readme",
+  "bugs": {
+    "url": "https://github.com/akadirsanli/SleepPilot/issues"
+  },
+  "bin": {
+    "sleeppilot": "src/main.mjs"
+  },
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "start:test-mode": "node src/main.mjs --test-mode",
+    "test": "node test/run.mjs",
+    "test:real": "node test/run.mjs real",
+    "doctor": "node src/main.mjs doctor",
+    "engines": "node src/main.mjs engines --connect"
+  },
+  "keywords": [
+    "autonomous-agent",
+    "agent-orchestrator",
+    "opencode",
+    "claude-code",
+    "codex-cli",
+    "deepseek",
+    "openai-compatible",
+    "ollama",
+    "deepseek-harness",
+    "toolchain-detection",
+    "reverse-engineering",
+    "rust",
+    "github",
+    "overnight",
+    "windows"
+  ],
+  "files": [
+    "src/",
+    "ui/",
+    "scripts/",
+    "docs/",
+    "SleepPilot.cmd",
+    "sleeppilot.sh",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "LICENSE",
+    "SECURITY.md",
+    "THIRD_PARTY.md"
+  ]
+}

@@ -1,0 +1,38 @@
+# Dependencies / build output (SleepPilot has no runtime dependencies)
+node_modules/
+*.tgz
+target/
+dist/
+build/
+out/
+
+# Local test homes, scratch output and reports
+.sleeppilot-test-home/
+test/.tmp/
+*.log
+*.jsonl.tmp
+coverage/
+htmlcov/
+
+# Editor / assistant / OS files
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# Never commit secrets or local configuration
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+app-state.json
+settings.json
+.sleeppilot/
+projects/
+runs/
+backups/
+engine-sessions/
