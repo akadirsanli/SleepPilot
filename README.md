@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshots/hero.gif" alt="SleepPilot: from a one-line objective at 23:00 to verified, evidence-backed work at 07:00" width="100%">
+<img src="docs/screenshots/hero.webp" alt="SleepPilot trailer: at 23:00 you describe the outcome; overnight the Manager plans, the Developer codes, a failing test is caught and repaired, a Reviewer approves, Claude's quota runs out and Codex takes over; at 07:00 the report shows 4/4 tasks verified" width="100%">
 
 # SleepPilot
 
