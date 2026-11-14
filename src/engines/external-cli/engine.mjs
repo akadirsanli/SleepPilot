@@ -8,8 +8,9 @@ import { readJson, writeJsonAtomic } from '../../util/fsx.mjs';
 import { killTree, resolveSpawn, runFile } from '../../util/proc.mjs';
 import { classifyError } from '../../opencode/errors.mjs';
 import { redact } from '../../util/redact.mjs';
+import { newEngineSessionId } from '../../util/ids.mjs';
 
-const NEW_SESSION = (id) => `ses_${id}_${crypto.randomBytes(9).toString('hex')}`;
+const NEW_SESSION = (id) => newEngineSessionId(id);
 
 /**
  * Base for external agent CLIs that already ship their own tool loop (Claude Code, Codex).

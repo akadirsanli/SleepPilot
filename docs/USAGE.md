@@ -245,7 +245,32 @@ sleeppilot reverse --target C:\games\demo --workspace C:\work\demo-re \
 
 `--yes` confirms authorization; `--start` launches the run immediately.
 
-## 10. Troubleshooting
+## 10. Testing and debugging
+
+### Deterministic session ids
+
+SleepPilot's own engines (API harness, Claude Code, Codex, DSH, Command harness)
+read `SLEEPPILOT_SESSION_ID` when they create a session. Setting it pins the
+session id instead of generating one:
+
+```powershell
+$env:SLEEPPILOT_SESSION_ID = "recovery-drill-1"
+node src/main.mjs ask --project C:\work\app --engine api --prompt "Fix the test"
+```
+
+Rules:
+
+- letters, digits, `_` and `-` only, at least 3 characters; the value is
+  truncated to 120 characters
+- an invalid value is ignored with a one-time warning; the engine keeps its
+  normal generated id
+- OpenCode manages its own session ids, so the variable does not apply there
+
+Reuse it when you want to inspect or replay the same session file, or when you
+need a stable id across processes during a crash-recovery drill. Do not reuse one
+id for two different projects: the session folder is shared.
+
+## 11. Troubleshooting
 
 | Symptom | What to do |
 |---|---|

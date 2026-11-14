@@ -10,8 +10,9 @@ import { engineSessionsDir } from '../../util/paths.mjs';
 import { readJson, writeJsonAtomic } from '../../util/fsx.mjs';
 import { classifyError } from '../../opencode/errors.mjs';
 import { redact } from '../../util/redact.mjs';
+import { newEngineSessionId } from '../../util/ids.mjs';
 
-const NEW_SESSION = () => `ses_api_${crypto.randomBytes(9).toString('hex')}`;
+const NEW_SESSION = () => newEngineSessionId('api');
 const NEW_ID = (p) => `${p}${crypto.randomBytes(6).toString('hex')}`;
 const API_EFFORTS = ['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 

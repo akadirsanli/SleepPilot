@@ -42,6 +42,13 @@ COMMON OPTIONS
   --json                             Machine-readable NDJSON / JSON output
   --quiet                            Do not print human log lines
 
+ENVIRONMENT
+  SLEEPPILOT_SESSION_ID              Reuse a fixed session id (letters, digits, _ and -;
+                                     at least 3 characters). Useful for crash-recovery
+                                     drills and for debugging a specific session. Engines
+                                     that own their own session ids (OpenCode) ignore it.
+  SLEEPPILOT_DEBUG=1                 Print stack traces on errors
+
 run
   --project <dir>                    Project folder (default: current directory)
   --create                           Create the project record if missing

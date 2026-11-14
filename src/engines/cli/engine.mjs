@@ -7,8 +7,9 @@ import { readJson, writeJsonAtomic } from '../../util/fsx.mjs';
 import { killTree, resolveSpawn, runFile } from '../../util/proc.mjs';
 import { classifyError } from '../../opencode/errors.mjs';
 import { redact } from '../../util/redact.mjs';
+import { newEngineSessionId } from '../../util/ids.mjs';
 
-const NEW_SESSION = () => `ses_cli_${crypto.randomBytes(9).toString('hex')}`;
+const NEW_SESSION = () => newEngineSessionId('cli');
 
 /**
  * Generic command-harness engine. Wraps any CLI agent that takes a prompt and prints an answer,

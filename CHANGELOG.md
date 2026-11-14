@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Deterministic session ids.** `SLEEPPILOT_SESSION_ID` pins the session id for
+  the engines that keep their own sessions (API harness, Claude Code, Codex, DSH,
+  Command harness). Invalid values are ignored with a one-time warning instead of
+  silently generating a different id. Useful for recovery drills and for
+  debugging one specific session. OpenCode manages its own ids and is unaffected.
+  See `docs/USAGE.md` → Testing and debugging.
+
 ## 2.4.1 — green CI, Node 20 HTML checks and a sharper public README
 
 ### Fixed
