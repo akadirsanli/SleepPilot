@@ -40,7 +40,9 @@ test('after a crash in sleep mode the reopened app continues the run by itself; 
     run.activeTurn = null;
     run.activeTurns = {};
   });
-  process.env.SLEEPPILOT_RECOVER_DELAY_MS = '100';
+  // Leave enough time to observe the paused state before the automatic recovery timer fires.
+  // The old 100 ms value raced app initialisation on faster CI runners (Node 22/24).
+  process.env.SLEEPPILOT_RECOVER_DELAY_MS = '3000';
   process.env.SLEEPPILOT_LAST_CRASH = JSON.stringify({ reason: 'out of memory (JavaScript heap out of memory)', detail: 'FATAL ERROR: Reached heap limit' });
   const app = await makeApp();
   try {

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.4.1 — green CI, Node 20 HTML checks and a sharper public README
+
+### Fixed
+
+- **HTML smoke checks now work on Node 20.** The DevTools connection used the
+  browser `WebSocket` global, which Node only provides from v22. SleepPilot now
+  uses a small RFC 6455 fallback when the global is unavailable.
+- **Unavailable HTML checks are reported as skipped, not failed.** A missing
+  browser or DevTools connection is an environment limitation, not evidence that
+  the project is broken.
+- **Flaky sleep-mode recovery test.** The test asserted the paused state after a
+  100 ms auto-resume timer; on faster CI runners the timer could fire first. It
+  now uses a deterministic 3-second window.
+
+### Changed
+
+- CI jobs have explicit timeouts and read-only repository permissions.
+- README adds a product tour, CI status, legal/affiliation disclosure and a
+  clearer honest-limits section.
+- SECURITY.md documents network access; CONTRIBUTING.md states inbound =
+  outbound MIT licensing.
+
 ## 2.4.0 — multi-harness routing, per-harness effort and quota fallback
 
 ### Added

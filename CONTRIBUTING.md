@@ -61,4 +61,4 @@ Security issues: see [SECURITY.md](SECURITY.md), **do not** open a public issue.
 
 ## License
 
-By contributing you agree that your contribution is licensed under the MIT licence in [LICENSE](LICENSE).
+By contributing you agree that your contribution is licensed under the MIT licence in [LICENSE](LICENSE). This is inbound = outbound; no separate CLA is required.

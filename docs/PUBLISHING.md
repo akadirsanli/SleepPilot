@@ -14,9 +14,9 @@ git log --oneline -1
 
 Expected release state:
 
-- version **2.4.0**
+- version **2.4.1**
 - clean `main` branch
-- tag **`v2.4.0`**
+- tag **`v2.4.1`**
 - no `.env`, credentials, run data or local settings in the working tree
 - CI workflow already at `.github/workflows/test.yml`
 
@@ -27,7 +27,7 @@ With the GitHub CLI (recommended):
 ```sh
 gh auth login
 gh repo create akadirsanli/SleepPilot --public --source=. --remote=origin --push
-git push origin v2.4.0
+git push origin v2.4.1
 ```
 
 Without `gh`:
@@ -35,7 +35,7 @@ Without `gh`:
 ```sh
 git remote add origin https://github.com/akadirsanli/SleepPilot.git
 git push -u origin main
-git push origin v2.4.0
+git push origin v2.4.1
 ```
 
 If the repository already exists, use `git remote add origin` and `git push -u origin main`.
@@ -64,11 +64,11 @@ Enable:
 - **Branch protection** on `main`: require the `tests` workflow, no force-push, no deletion
 - **Actions permissions**: allow GitHub Actions; the workflow only uses `actions/checkout`, `actions/setup-node` and `dtolnay/rust-toolchain`
 
-## Release v2.4.0
+## Release v2.4.1
 
-Create a GitHub Release from tag `v2.4.0` with a short summary and a link to `CHANGELOG.md`:
+Create a GitHub Release from tag `v2.4.1` with a short summary and a link to `CHANGELOG.md`:
 
-> 2.4.0 adds multi-harness routing with per-role engine/model/effort pins, exact Claude/Codex/API effort support, adapter-level read-only enforcement for Manager/Reviewer sessions, quota-aware fallback that detects Claude's 5-hour window and keeps a longer working window alive, and a headless `sleeppilot route --dry-run` surface with routing fields on every NDJSON turn.
+> 2.4.1 makes the HTML smoke checks work on Node 20, reports unavailable browser checks as skipped instead of failed, removes a flaky recovery-test race, and sharpens the public README, CI timeouts and security notes.
 
 Attach no generated binaries; SleepPilot is run from source with Node.js.
 
@@ -94,5 +94,5 @@ SleepPilot's real data lives outside the repository (`%LOCALAPPDATA%\SleepPilot`
 - Confirm the CI matrix passes on Windows for Node 20, 22 and 24, and the Rust job on Ubuntu.
 - Open the repository page and check the README renders (screenshots, badges and tables).
 - Check that the `tests` badge/actions are green.
-- Create the `v2.4.0` release.
+- Create the `v2.4.1` release.
 - Share the security policy and contribution guide with contributors.

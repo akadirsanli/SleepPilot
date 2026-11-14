@@ -242,7 +242,7 @@ export class SleepPilotApp extends EventEmitter {
     const activeList = this.activeControllers();
     const active = activeList[0] || null;
     return {
-      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.4.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.4.1', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
       engines: this.enginesView(),
       opencode: this.opencodeView(),
       settings: this.settings,

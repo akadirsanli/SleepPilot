@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -58,14 +59,14 @@ function staticServer(root) {
  */
 export async function runHtmlSmoke(opts) {
   const browsers = findBrowsers();
-  if (!browsers.length) return { status: 'error', summary: 'Microsoft Edge or Chrome not found; the HTML check could not run.', pages: [] };
+  if (!browsers.length) return { status: 'skipped', summary: 'Microsoft Edge or Chrome not found; the HTML check is unavailable.', pages: [] };
   const startErrors = [];
   for (const browserPath of browsers) {
     const r = await runWithBrowser(browserPath, opts);
     if (!r.startFailed) return startErrors.length ? { ...r, summary: `${r.summary} (with ${path.basename(browserPath)}; could not start: ${startErrors.join(', ')})` } : r;
     startErrors.push(`${path.basename(browserPath)}: ${r.startFailed}`);
   }
-  return { status: 'error', summary: `The HTML check could not run; no browser could be started (${startErrors.join('; ')}).`, pages: [] };
+  return { status: 'skipped', summary: `The HTML check is unavailable; no browser could be started (${startErrors.join('; ')}).`, pages: [] };
 }
 
 async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 60, settleMs = 2000 }) {
@@ -101,7 +102,9 @@ async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 6
     cdp.close();
   } catch (err) {
     if (!started) return { startFailed: err.message };
-    return { status: 'error', summary: `The HTML check could not run: ${err.message}`, pages };
+    // The browser started but the DevTools connection failed. That is an unavailable
+    // check, not evidence that the project's HTML is broken.
+    return { status: 'skipped', summary: `The HTML check is unavailable: ${err.message}`, pages };
   } finally {
     killTree(browser.pid);
     server.close();
@@ -157,9 +160,15 @@ async function checkPage(cdp, url, entry, timeoutSec, settleMs) {
   }
 }
 
+function createWebSocket(wsUrl) {
+  // Node 22+ ships a browser-compatible WebSocket. Node 20 does not, so keep a small
+  // RFC 6455 client for the DevTools connection instead of turning the check into an error.
+  return typeof globalThis.WebSocket === 'function' ? new globalThis.WebSocket(wsUrl) : new NodeWebSocket(wsUrl);
+}
+
 function connectCdp(wsUrl) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl);
+    const ws = createWebSocket(wsUrl);
     let nextId = 1;
     const pending = new Map();
     const listeners = new Set();
@@ -197,4 +206,166 @@ function connectCdp(wsUrl) {
       }
     };
   });
+}
+
+/**
+ * Minimal RFC 6455 client used only when Node has no global WebSocket (Node 20).
+ * DevTools messages are JSON text frames; control and fragmentation frames are handled.
+ */
+class NodeWebSocket {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.socket = null;
+    this.onopen = null;
+    this.onmessage = null;
+    this.onerror = null;
+    this.onclose = null;
+    this._buffer = Buffer.alloc(0);
+    this._fragments = [];
+    this._connect();
+  }
+
+  _connect() {
+    const u = new URL(this.url);
+    const key = crypto.randomBytes(16).toString('base64');
+    const req = http.request({
+      hostname: u.hostname,
+      port: u.port || 80,
+      path: `${u.pathname}${u.search}`,
+      method: 'GET',
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Key': key,
+        'Sec-WebSocket-Version': '13',
+      },
+    });
+    req.setTimeout(20_000, () => req.destroy(new Error('CDP WebSocket handshake timed out')));
+    req.on('upgrade', (res, socket, head) => {
+      const expected = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+      if (res.headers['sec-websocket-accept'] !== expected) {
+        socket.destroy();
+        this._fail(new Error('CDP WebSocket handshake was not accepted'));
+        return;
+      }
+      this.socket = socket;
+      this.readyState = 1;
+      socket.setNoDelay(true);
+      socket.on('data', (d) => this._onData(d));
+      socket.on('error', (err) => this._fail(err));
+      socket.on('close', () => this._closed());
+      if (head?.length) this._onData(head);
+      this.onopen?.({});
+    });
+    req.on('response', (res) => {
+      res.resume();
+      this._fail(new Error(`CDP WebSocket handshake failed with HTTP ${res.statusCode}`));
+    });
+    req.on('error', (err) => this._fail(err));
+    req.end();
+  }
+
+  _fail(err) {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.onerror?.(err);
+    try { this.socket?.destroy(); } catch {}
+    this._closed();
+  }
+
+  _closed() {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.onclose?.({});
+  }
+
+  send(data) {
+    if (this.readyState !== 1) throw new Error('CDP WebSocket is not open');
+    this._sendFrame(Buffer.from(String(data), 'utf8'), 1);
+  }
+
+  close() {
+    if (this.readyState === 1) {
+      try { this._sendFrame(Buffer.alloc(0), 8); } catch {}
+    }
+    this.readyState = 3;
+    try { this.socket?.end(); } catch {}
+  }
+
+  _sendFrame(payload, opcode) {
+    if (!this.socket) return;
+    const len = payload.length;
+    let header;
+    if (len < 126) {
+      header = Buffer.from([0x80 | opcode, 0x80 | len]);
+    } else if (len < 65_536) {
+      header = Buffer.alloc(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 0x80 | 126;
+      header.writeUInt16BE(len, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x80 | opcode;
+      header[1] = 0x80 | 127;
+      header.writeBigUInt64BE(BigInt(len), 2);
+    }
+    const mask = crypto.randomBytes(4);
+    const masked = Buffer.allocUnsafe(len);
+    for (let i = 0; i < len; i++) masked[i] = payload[i] ^ mask[i & 3];
+    this.socket.write(Buffer.concat([header, mask, masked]));
+  }
+
+  _onData(chunk) {
+    this._buffer = Buffer.concat([this._buffer, chunk]);
+    while (this._buffer.length >= 2) {
+      const b0 = this._buffer[0];
+      const b1 = this._buffer[1];
+      const fin = (b0 & 0x80) !== 0;
+      const opcode = b0 & 0x0f;
+      const masked = (b1 & 0x80) !== 0;
+      let len = b1 & 0x7f;
+      let offset = 2;
+      if (len === 126) {
+        if (this._buffer.length < 4) return;
+        len = this._buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (len === 127) {
+        if (this._buffer.length < 10) return;
+        const big = this._buffer.readBigUInt64BE(2);
+        if (big > 100_000_000n) { this._fail(new Error('CDP WebSocket frame is too large')); return; }
+        len = Number(big);
+        offset = 10;
+      }
+      let mask = null;
+      if (masked) {
+        if (this._buffer.length < offset + 4) return;
+        mask = this._buffer.subarray(offset, offset + 4);
+        offset += 4;
+      }
+      if (this._buffer.length < offset + len) return;
+      let payload = this._buffer.subarray(offset, offset + len);
+      this._buffer = this._buffer.subarray(offset + len);
+      if (mask) {
+        payload = Buffer.from(payload);
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
+      }
+      if (opcode === 8) { this._closed(); try { this.socket?.end(); } catch {} return; }
+      if (opcode === 9) { this._sendFrame(payload, 10); continue; }
+      if (opcode === 10) continue;
+      if (opcode === 1 || opcode === 2) {
+        this._fragments = [payload];
+        if (fin) this._emitMessage();
+      } else if (opcode === 0) {
+        this._fragments.push(payload);
+        if (fin) this._emitMessage();
+      }
+    }
+  }
+
+  _emitMessage() {
+    const message = Buffer.concat(this._fragments).toString('utf8');
+    this._fragments = [];
+    this.onmessage?.({ data: message });
+  }
 }

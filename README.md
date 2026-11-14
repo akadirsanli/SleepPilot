@@ -20,7 +20,9 @@ babysitting a chat window.
 
 </div>
 
-![SleepPilot home screen](docs/screenshots/home.png)
+<p align="center">
+  <img src="docs/screenshots/demo.gif" alt="SleepPilot product tour: home, project setup, live run and Reverse & Rust" width="960">
+</p>
 
 ## Why SleepPilot
 
@@ -287,6 +289,10 @@ powerful automation tool, not a sandbox.
 
 Read [SECURITY.md](SECURITY.md) before running an unrestricted profile.
 
+SleepPilot is an independent project. It is **not affiliated with, endorsed by,
+or sponsored by** OpenCode, Anthropic, OpenAI, DeepSeek, Microsoft or any other
+vendor whose CLI or API it can drive.
+
 ## Under the hood
 
 ```
@@ -334,10 +340,11 @@ node test/run.mjs
 node src/main.mjs --test-mode --no-open --no-supervisor
 ```
 
-The suite uses fake OpenCode, API, DSH, Claude Code and Codex servers/CLIs, so it
-needs no account and spends no usage. Rust tests run when `cargo` is installed;
-otherwise the Rust checks report a clear “cargo not found” message and the rest
-of the suite still passes.
+CI runs the full suite on **Node.js 20, 22 and 24 on Windows**, plus the Rust
+recon/check tests on Ubuntu. The suite uses fake OpenCode, API, DSH, Claude Code
+and Codex servers/CLIs, so it needs no account and spends no usage. Rust tests
+run locally when `cargo` is installed; otherwise the Rust checks report a clear
+“cargo not found” message and the rest of the suite still passes.
 
 Real OpenCode tests are opt-in:
 

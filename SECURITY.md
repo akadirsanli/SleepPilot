@@ -20,6 +20,16 @@ SleepPilot is a local, single-user application that drives an AI coding agent wi
 - CSP `default-src 'self'`; all UI text is HTML-escaped.
 - The token is kept in `app-state.json` so a second launch can reopen the window. Any process running as the same user can read it; that is the same trust boundary as the rest of the data folder.
 
+## Network access
+
+SleepPilot is local-first, but it is not offline-only:
+
+- **API engine** — sends prompts/tool results to the provider you configure (DeepSeek, OpenAI, Anthropic, OpenRouter, Groq, Mistral, xAI, LM Studio, vLLM or compatible gateways).
+- **Local AI** — talks to the Ollama endpoint on your machine (`127.0.0.1:11434` by default); no cloud key is required.
+- **CLI engines** — OpenCode, Claude Code, Codex and DSH make their own network calls according to their vendor configuration.
+- **Web fetch tool** — an agent can fetch an HTTP(S) URL you or a task asks it to read.
+- **No telemetry** is sent to the SleepPilot project. The UI server is loopback-only.
+
 ## What the agent may do
 
 SleepPilot drives an agent that edits files and runs commands in the project folder you choose.
