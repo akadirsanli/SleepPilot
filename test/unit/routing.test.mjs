@@ -67,6 +67,19 @@ test('quota tracker records a Claude 5-hour window and exposes canUse', () => {
   assert.equal(q.canUse('claude', now).ok, true);
 });
 
+test('quota tracker: a new run clears guessed cooldowns but keeps reported and Claude windows', () => {
+  const now = Date.now();
+  const q = new QuotaTracker({ routing: { claudeWindowHours: 5, quotaCooldownMin: { opencode: 30, codex: 30 } } });
+  q.observe('opencode', { classification: { category: 'quota', message: 'limit' }, at: now });
+  q.observe('codex', { quota: { exhausted: true, resetsAt: now + 3_600_000 }, at: now });
+  q.observe('claude', { quota: { exhausted: true, message: '5-hour limit' }, at: now });
+  assert.equal(q.canUse('opencode', now).ok, false);
+  q.clearGuessed();
+  assert.equal(q.canUse('opencode', now).ok, true, 'a 30-minute guess does not outlive the run that caused it');
+  assert.equal(q.canUse('codex', now).ok, false, 'a provider-reported reset time stays');
+  assert.equal(q.canUse('claude', now).ok, false, 'the Claude usage window stays');
+});
+
 test('Claude reset hints are parsed from real-style messages', () => {
   const now = new Date('2026-11-10T12:00:00');
   assert.equal(parseResetHint('You reached your 5-hour limit. Resets at 5:00 PM.', now), new Date('2026-11-10T17:00:00').getTime());

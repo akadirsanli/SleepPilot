@@ -13,6 +13,16 @@ const STARTUP_RETRIES = 15;
 const STARTUP_RETRY_MS = Number(process.env.SLEEPPILOT_STARTUP_RETRY_MS || 2000);
 
 /**
+ * OpenCode lists many models twice: once under "opencode" (Zen, billed to pay-as-you-go credits)
+ * and once under "opencode-go" (covered by the OpenCode Go subscription), with the same name.
+ * Picking the wrong one fails with "Insufficient balance", so the model picker spells it out.
+ */
+export const PROVIDER_LABELS = {
+  'opencode-go': 'OpenCode Go (subscription)',
+  opencode: 'OpenCode Zen (pay-as-you-go credits)',
+};
+
+/**
  * High-level OpenCode 2.x integration used by the orchestrator.
  * Owns a private loopback server, exposes capability/status info, and runs "turns"
  * (one prompt → wait for idle → durable reconciliation).
@@ -32,6 +42,7 @@ export class OpenCodeAdapter extends EventEmitter {
     this.defaultModel = null;
     this.serverInfo = null;
     this.restarts = 0;
+    this.generation = 0; // bumped by disconnect(): a connect still in progress then gives up
     this.sessionListeners = new Map(); // sessionID -> Set<fn>
   }
 
@@ -52,6 +63,15 @@ export class OpenCodeAdapter extends EventEmitter {
 
   async _connect() {
     await this.disconnect();
+    const gen = this.generation;
+    let server = null;
+    // Shut down (or reconnected) while this connect was still waiting: never leave a server behind.
+    const superseded = async () => {
+      if (gen === this.generation) return false;
+      await server?.stop();
+      if (this.server === server) this.server = null;
+      return true;
+    };
     this.setStatus('detecting', 'Looking for OpenCode…');
     let command;
     if (this.testCommand) {
@@ -66,6 +86,7 @@ export class OpenCodeAdapter extends EventEmitter {
       command = this.testCommand;
     } else {
       this.detection = await detectOpenCode({ override: this.settings.opencodePath });
+      if (await superseded()) return this.status;
       if (!this.detection.found || ['unsupported', 'unknown', 'missing'].includes(this.detection.support.status)) {
         this.setStatus('error', this.detection.support.message, { detection: this.detection });
         return this.status;
@@ -73,21 +94,23 @@ export class OpenCodeAdapter extends EventEmitter {
       command = { exe: this.detection.path };
     }
     this.setStatus('starting', 'Starting the OpenCode server…');
-    this.server = new OpenCodeServerProcess(command);
+    server = this.server = new OpenCodeServerProcess(command);
     let conn;
     try {
-      conn = await this.server.start();
+      conn = await server.start();
     } catch (err) {
+      if (await superseded()) return this.status;
       this.setStatus('error', `Could not start the OpenCode server: ${redact(err.message)}`);
       return this.status;
     }
-    this.server.on('exit', () => this.onServerExit());
+    if (await superseded()) return this.status;
+    server.on('exit', () => this.onServerExit());
     this.client = new OpenCodeClient({ url: conn.url, password: conn.password });
     try {
       this.capabilities = await this.client.loadCapabilities();
       if (!this.capabilities.ok) {
         this.setStatus('error', `This OpenCode version does not offer the required API operations: ${this.capabilities.missing.join(', ')}`);
-        await this.server.stop();
+        await server.stop();
         return this.status;
       }
       // Seen on 2.2.0 right after start: HTTP 503 "Location plugins did not finish activating".
@@ -105,7 +128,11 @@ export class OpenCodeAdapter extends EventEmitter {
       }
     } catch (err) {
       this.setStatus('error', `OpenCode API check failed: ${redact(err.message)}`);
-      await this.server.stop();
+      await server.stop();
+      return this.status;
+    }
+    if (await superseded()) {
+      this.client = null;
       return this.status;
     }
     this.client.on('event', (ev) => this.dispatchEvent(ev));
@@ -127,6 +154,7 @@ export class OpenCodeAdapter extends EventEmitter {
       .filter((m) => m.enabled !== false)
       .map((m) => ({
         providerID: m.providerID,
+        providerLabel: PROVIDER_LABELS[m.providerID] || m.providerID,
         id: m.modelID || m.id,
         name: m.name,
         status: m.status,
@@ -154,6 +182,7 @@ export class OpenCodeAdapter extends EventEmitter {
   }
 
   async disconnect() {
+    this.generation++;
     this.client?.stopEvents();
     this.client = null;
     if (this.server) await this.server.stop();

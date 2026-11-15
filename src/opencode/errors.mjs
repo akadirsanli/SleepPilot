@@ -22,7 +22,24 @@ export function classifyError(err) {
   if (type.startsWith('permission.') || /user declined|permission denied/.test(lower)) {
     return { category: 'permission_rejected', action: 'none', message, label: 'Permission rejected' };
   }
-  if (type === 'provider.quota' || status === 402 || /quota|insufficient (balance|credit|funds)|allowance|usage limit|limit reached|out of credits/.test(lower)) {
+  // Seen on OpenCode 2.3.0 with an OpenCode Go subscription and model "opencode/deepseek-v4.1-flash":
+  // "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. …
+  // OpenCode Go covers only requests to the OpenCode Go provider." The same model exists as
+  // "opencode-go/…". This is not a usage window that renews: waiting does not help and the engine
+  // itself is fine, so it must not put the whole harness into a quota cooldown.
+  if (/insufficient (balance|credit|funds)|pay-as-you-go|top up|credit balance|out of credits|payment required/.test(lower)) {
+    const goOnly = /opencode go/.test(lower);
+    return {
+      category: 'billing',
+      action: 'pause',
+      message,
+      label: 'Model not covered by your plan (no credits)',
+      hint: goOnly
+        ? 'This model is billed to pay-as-you-go OpenCode credits, but your OpenCode Go plan only covers models of the "opencode-go" provider. Pick the "OpenCode Go" version of the model (opencode-go/…) for every role and start the run again.'
+        : 'The provider has no credit balance for this model. Choose a model your plan covers, or add credits in the provider console. SleepPilot never changes billing settings.',
+    };
+  }
+  if (type === 'provider.quota' || status === 402 || /quota|allowance|usage limit|limit reached/.test(lower)) {
     return {
       category: 'quota',
       action: 'pause',

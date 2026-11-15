@@ -657,8 +657,10 @@ export class RunController extends EventEmitter {
       }
       if (run.activeTurn || Object.keys(run.activeTurns || {}).length) await this.recoverActiveTurn();
       await this.recoverOrphans();
-      if (!run.planned) await this.withProviderHandling(() => this.planPhase());
-      await this.reviewPlanIfAsked();
+      // A stop that ended a pause above (e.g. a failed model check) must not start planning first:
+      // that sent another request to the failing model and paused again, so Stop had to be pressed twice.
+      if (!run.planned && !this.control.stop) await this.withProviderHandling(() => this.planPhase());
+      if (!this.control.stop) await this.reviewPlanIfAsked();
       for (;;) {
         if (await this.handleControl()) return;
         const lim = this.limitReached();
@@ -711,7 +713,7 @@ export class RunController extends EventEmitter {
         await this.sleepInterruptible(delay);
         return 'retry';
       }
-      const code = { quota: 'quota', auth: 'auth', config: 'provider_config', content_filter: 'provider_config' }[cls.category] || 'unexpected_error';
+      const code = { quota: 'quota', auth: 'auth', config: 'provider_config', billing: 'provider_config', content_filter: 'provider_config' }[cls.category] || 'unexpected_error';
       await this.pauseFor(code, `${cls.label}: ${redact(cls.message)}${cls.hint ? '\n' + cls.hint : ''}`, { resetsAt: cls.resetsAt || null });
       return 'retry';
     }
@@ -888,8 +890,9 @@ export class RunController extends EventEmitter {
     const dev = routesUsed.developer;
     if (!dev?.ok) {
       const cls = dev?.classification || { category: 'config', action: 'pause', label: 'Model check failed', message: 'The Developer route did not answer.' };
-      if (cls.action !== 'none' && !['config', 'auth', 'content_filter'].includes(cls.category)) throw new ProviderFailure(cls, 'developer');
-      await this.pauseFor('provider_config', `The Developer route does not work (${dev?.harness || 'none'}): ${dev?.error || 'no answer'}. Choose another model profile on the Setup screen and start a new run.`);
+      if (cls.action !== 'none' && !['config', 'auth', 'content_filter', 'billing'].includes(cls.category)) throw new ProviderFailure(cls, 'developer');
+      const why = String(dev?.error || 'no answer').replace(/[.\s]+$/, '');
+      await this.pauseFor('provider_config', `The Developer route does not work (${dev?.harness || 'none'}): ${why}. ${cls.hint || 'Choose another model on the Setup screen and start a new run.'}`);
       return 'retry';
     }
     for (const role of roles.slice(1)) {
@@ -1023,6 +1026,8 @@ export class RunController extends EventEmitter {
 
   async pauseFor(code, message, { resetsAt } = {}) {
     const run = this.run;
+    // Stop was already requested: nobody would wake this pause, the loop finishes the run instead.
+    if (this.control.stop) return;
     // Register for wake-up BEFORE the state becomes "paused" and before any await: a resume/stop
     // that arrives while the state is being saved must not be lost (it left runs paused forever).
     const woken = new Promise((resolve) => this.resumeWaiters.push(resolve));

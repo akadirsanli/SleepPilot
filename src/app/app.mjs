@@ -526,6 +526,9 @@ export class SleepPilotApp extends EventEmitter {
     project.lastRunId = run.id;
     await this.store.saveProject(project);
     await this.store.saveRun(run);
+    // A cooldown guessed after an earlier run's error must not block a run started by hand
+    // (e.g. after the user switched to a model their plan covers). Real reset windows stay.
+    this.quotaTracker.clearGuessed();
     const ctrl = this.attach(new RunController({
       store: this.store,
       adapter: engine,

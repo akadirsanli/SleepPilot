@@ -37,6 +37,8 @@ const STEP_MS = Number(process.env.SLEEPPILOT_FAKE_STEP_MS || 60);
 // limited to review prompts matching the SLEEPPILOT_FAKE_REVIEW_MATCH regex when that is set.
 const REVIEW_MS = Number(process.env.SLEEPPILOT_FAKE_REVIEW_MS || 0);
 const REVIEW_MATCH = process.env.SLEEPPILOT_FAKE_REVIEW_MATCH ? new RegExp(process.env.SLEEPPILOT_FAKE_REVIEW_MATCH) : null;
+// Sessions whose model belongs to this provider fail like a pay-as-you-go model without credits.
+const NO_CREDITS_PROVIDER = process.env.SLEEPPILOT_FAKE_NO_CREDITS_PROVIDER || null;
 
 const sessions = new Map();
 let startup503 = Number(process.env.SLEEPPILOT_FAKE_STARTUP_503 || 0);
@@ -259,6 +261,12 @@ async function execute(session) {
     let noIdle = false;
     try {
       await sleep(STEP_MS);
+      // Real OpenCode 2.3.0 answer for a pay-as-you-go model on an account that only has OpenCode Go.
+      if (NO_CREDITS_PROVIDER && session.model?.providerID === NO_CREDITS_PROVIDER) {
+        throw Object.assign(new Error('no credits'), {
+          structured: { type: 'provider.quota', message: 'Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1. OpenCode Go covers only requests to the OpenCode Go provider.' },
+        });
+      }
       if (/SleepPilot model check/.test(text)) reply = 'OK';
       else if (/FACTS MEASURED BY SLEEPPILOT/.test(text)) reply = `FAKE closing report (test double).\n${(text.match(/Net change since the run started: [^\n]*/) || [''])[0]}`;
       else if (/You are the MANAGER/.test(text) || /could not be parsed/.test(text)) reply = managerReply(text, session);
@@ -335,7 +343,12 @@ const server = http.createServer(async (req, res) => {
       startup503--;
       return send(res, 503, { _tag: 'ServiceUnavailableError', message: 'Location plugins did not finish activating' });
     }
-    if (p === '/api/model') return send(res, 200, { location: {}, data: [{ id: 'fake/test-model', modelID: 'test-model', providerID: 'fake', name: 'Fake Test Model', enabled: true, status: 'active', cost: [{ input: 0.15, output: 0.6 }], limit: { context: 128000, output: 8000 } }, { id: 'fake/other-model', modelID: 'other-model', providerID: 'fake', name: 'Fake Other Model', enabled: true, status: 'active', cost: [], limit: { context: 64000, output: 4000 } }] });
+    if (p === '/api/model') {
+      const data = [{ id: 'fake/test-model', modelID: 'test-model', providerID: 'fake', name: 'Fake Test Model', enabled: true, status: 'active', cost: [{ input: 0.15, output: 0.6 }], limit: { context: 128000, output: 8000 } }, { id: 'fake/other-model', modelID: 'other-model', providerID: 'fake', name: 'Fake Other Model', enabled: true, status: 'active', cost: [], limit: { context: 64000, output: 4000 } }];
+      // The same model under OpenCode Zen and OpenCode Go, as the real catalogue lists it.
+      if (NO_CREDITS_PROVIDER) for (const providerID of ['opencode', 'opencode-go']) data.push({ id: `${providerID}/deepseek-v4.1-flash`, modelID: 'deepseek-v4.1-flash', providerID, name: 'DeepSeek V4.1 Flash', enabled: true, status: 'active', cost: [], limit: { context: 128000, output: 8000 } });
+      return send(res, 200, { location: {}, data });
+    }
     if (p === '/api/model/default') return send(res, 200, { location: {}, data: { modelID: 'test-model', providerID: 'fake', name: 'Fake Test Model' } });
     if (p === '/api/agent') return send(res, 200, { location: {}, data: [{ id: 'build', name: 'build', mode: 'primary', hidden: false }, { id: 'plan', name: 'plan', mode: 'primary', hidden: false }] });
     if (p === '/api/experimental/usage/limits') {

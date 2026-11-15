@@ -68,6 +68,17 @@ test('classifyError: distinct handling for quota, 429, auth, transient, config',
   assert.equal(classifyError({ type: 'aborted', message: 'Step interrupted' }).action, 'none');
 });
 
+test('classifyError: a pay-as-you-go model without credits is a model choice, not a quota window', () => {
+  const real = 'Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1. OpenCode Go covers only requests to the OpenCode Go provider.';
+  const c = classifyError({ type: 'provider.quota', message: real });
+  assert.equal(c.category, 'billing');
+  assert.equal(c.action, 'pause');
+  assert.match(c.hint, /opencode-go/);
+  assert.equal(classifyError({ status: 402, message: 'Insufficient credit balance' }).category, 'billing');
+  assert.doesNotMatch(classifyError({ message: 'Insufficient credit balance' }).hint, /opencode-go/, 'the Go hint only when the provider says so');
+  assert.equal(classifyError({ type: 'provider.quota', message: 'Monthly usage limit reached' }).category, 'quota', 'a real allowance limit is still a quota');
+});
+
 test('reconcileTurn: idle marker after our message decides the outcome', () => {
   const after = [
     { type: 'assistant', model: { providerID: 'opencode-go', id: 'm' }, cost: 0.001, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 1, write: 0 } }, content: [{ type: 'tool', name: 'write', state: { status: 'completed', input: { path: 'a' }, content: [{ type: 'text', text: 'ok' }] } }] },

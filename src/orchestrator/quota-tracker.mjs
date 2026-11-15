@@ -51,12 +51,15 @@ export class QuotaTracker {
     const isQuota = !!q?.exhausted || classification?.category === 'quota';
     if (isQuota) {
       const hours = harness === 'claude' ? (this.routing.claudeWindowHours || 5) : null;
-      const until = Number(q?.resetsAt) || (hours ? at + hours * 3_600_000 : at + (this.routing.quotaCooldownMin?.[harness] || 30) * 60_000);
+      const reported = Number(q?.resetsAt) || null;
+      const until = reported || (hours ? at + hours * 3_600_000 : at + (this.routing.quotaCooldownMin?.[harness] || 30) * 60_000);
       this._block(harness, {
         until,
         reason: q?.message || classification?.message || 'usage quota exhausted',
         source: q?.source || 'adapter',
         windowHours: hours,
+        // Neither a reset time from the provider nor a known usage window: only a cooldown guess.
+        guessed: !reported && !hours,
         at,
       });
       return this.windows[harness];
@@ -71,7 +74,7 @@ export class QuotaTracker {
     return null;
   }
 
-  _block(harness, { until, reason, source, windowHours, at }) {
+  _block(harness, { until, reason, source, windowHours, guessed = false, at }) {
     const prev = this.windows[harness] || {};
     this.windows[harness] = {
       harness,
@@ -79,6 +82,7 @@ export class QuotaTracker {
       reason,
       source,
       windowHours,
+      guessed,
       windowStart: windowHours ? at : prev.windowStart || null,
       windowEnd: windowHours ? at + windowHours * 3_600_000 : prev.windowEnd || null,
       exhaustedAt: isFinite(until) ? at : prev.exhaustedAt || null,
@@ -92,6 +96,14 @@ export class QuotaTracker {
     for (const [harness, w] of Object.entries(this.windows)) {
       if (w.blockedUntil && w.blockedUntil <= at) delete this.windows[harness];
     }
+  }
+
+  /**
+   * A run the user starts by hand gets a fresh try on harnesses that are only in a guessed
+   * cooldown. Windows with a provider-reported reset time or a known usage window (Claude) stay.
+   */
+  clearGuessed() {
+    for (const [harness, w] of Object.entries(this.windows)) if (w.guessed) delete this.windows[harness];
   }
 
   /** Explicit user resume after a quota pause: let the controller try the harness again. */
