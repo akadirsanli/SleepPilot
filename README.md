@@ -18,7 +18,7 @@ overnight, and only marks a task done when the checks actually pass.
 [![Node.js 20.10+](https://img.shields.io/badge/node-%3E%3D20.10-339933?logo=node.js&logoColor=white)](package.json)
 [![runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-blue)](package.json)
 
-[**Quick start**](#-quick-start) · [How a night works](#-what-happens-while-you-sleep) · [Engines](#-bring-the-agent-you-already-trust) · [Reverse & Rust](#-sleep--reverse--rust-it) · [Docs](#-documentation)
+[**Quick start**](#-quick-start) · [How a night works](#-what-happens-while-you-sleep) · [📱 Phone remote](#-your-phone-is-the-remote) · [Engines](#-bring-the-agent-you-already-trust) · [Reverse & Rust](#-sleep--reverse--rust-it) · [Docs](#-documentation)
 
 </div>
 
@@ -53,8 +53,8 @@ citations. Model self-reports are recorded as **claims**, never as proof.
 
 ### 🌙 Built to survive the night
 Stall watchdog, crash supervisor, memory guard, durable sessions and quota-aware
-fallback. Failures become recovery paths, not a lost night. Check in from bed:
-scan a QR code and your phone becomes the remote.
+fallback. Failures become recovery paths, not a lost night.
+**📱 Check in from bed:** scan a QR code and your phone becomes the remote.
 
 </td>
 <td width="33%" valign="top">
@@ -125,6 +125,38 @@ gets a recovery path.
   <br><sub>A real run: the first patch fails an exact-content check, the Developer fixes it, the check passes, the Manager closes the task.</sub>
 </p>
 
+## 📱 Your phone is the remote
+
+Leave the PC running and go to bed. **Scan one QR code and your phone controls
+SleepPilot** — at home or away, over Wi-Fi or mobile data.
+
+<table>
+<tr>
+<td width="62%" valign="top"><img src="docs/screenshots/phone-qr.png" alt="Settings → Phone: a QR code to scan with the phone"><br><sub><b>On the PC</b> — Settings → Phone → scan the QR code. Done once; the phone stays signed in.</sub></td>
+<td width="38%" valign="top"><img src="docs/screenshots/phone-run.png" alt="A live run on the phone with Pause, Stop and a permission request"><br><sub><b>On the phone</b> — a live run. Allow the request, pause, stop or steer.</sub></td>
+</tr>
+</table>
+
+From the phone you can:
+
+- ✅ **Answer permission requests and questions** the agent is waiting on
+- ⏸️ **Pause, stop or add an hour** to a run
+- 🧭 **Steer** — tell the agent to change direction mid-run
+- 📋 **Edit tasks**, watch the live conversation and read the morning report
+- ▶️ **Start new runs** on any project
+
+**Set up in 3 steps:** install the free [Tailscale](https://tailscale.com) app on
+the PC and the phone (same account) → **Settings → Phone → Turn on phone
+access** → scan the QR code.
+
+**Private by design.** SleepPilot listens only on your Tailscale address, so only
+your own devices can reach it — it is never opened to the Wi-Fi or the internet,
+and no port forwarding or cloud account for SleepPilot is needed. The phone gets
+its own key, separate from the PC's; "Sign out all phones" revokes it instantly.
+API keys, closing the app and phone settings stay on the PC. Off until you turn
+it on. Details: [USAGE](docs/USAGE.md#control-sleeppilot-from-your-phone) ·
+[SECURITY](SECURITY.md#phone-access-off-by-default).
+
 ## 🎯 Who is this for?
 
 - You use **Claude Code, Codex or OpenCode** and want to hand it a job at night
@@ -133,6 +165,8 @@ gets a recovery path.
   which one codes and which one reviews — with automatic fallback when one runs
   out of quota.
 - You're **tired of agents saying “done”** while the tests are still failing.
+- You want to **check on the night shift from your phone** instead of walking
+  back to the PC.
 - You want all of this **local-first**: your machine, your keys, your repo.
 
 ## 🆚 Why not just run Claude Code or Codex directly?
@@ -146,6 +180,7 @@ gets a recovery path.
 | Quota exhausted | Run stops | Next route in the fallback chain continues the **same task** |
 | Big refactors | One long context | File-scoped tasks, parallel developers on non-overlapping scopes |
 | Choice of model | One vendor | Different engine, model and effort per role |
+| Agent needs approval at 3 a.m. | Walk to the PC or lose the night | Answer it from your phone |
 | Morning | Scroll the chat | A measured report: files, checks, verdicts, tokens |
 
 SleepPilot doesn't replace your agent — it **supervises** it. Keep the tool you
@@ -364,7 +399,7 @@ More in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 | Document | What is inside |
 |---|---|
-| [USAGE](docs/USAGE.md) | Install, first run, presets, steering, recovery, CLI |
+| [USAGE](docs/USAGE.md) | Install, first run, presets, steering, phone remote, recovery, CLI |
 | [ENGINES](docs/ENGINES.md) | Engine contract, providers, Claude/Codex/DSH setup |
 | [ROUTING](docs/ROUTING.md) | Role pins, model profiles, effort, quota fallback |
 | [REVERSE](docs/REVERSE.md) | Reverse & Rust: recon, evidence, Rust rules |
