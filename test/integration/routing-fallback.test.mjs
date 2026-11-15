@@ -50,6 +50,12 @@ class FakeHarness extends EventEmitter {
       return { ...base, finalText: JSON.stringify(review), allText: JSON.stringify(review) };
     }
     if (/You are the DEVELOPER/.test(text)) {
+      if (this.failDeveloper === 'provider') {
+        return {
+          ...base, status: 'failed', outcome: 'failed',
+          errors: [{ type: 'provider.error', message: 'Temporary provider failure', classification: { category: 'transient', action: 'retry', label: 'Temporary provider error', message: 'Temporary provider failure' } }],
+        };
+      }
       if (this.failDeveloper) {
         return {
           ...base,
@@ -75,7 +81,7 @@ class FakeHarness extends EventEmitter {
   async sessionDiff() { return []; }
 }
 
-test('routing pins manager/developer/reviewer and falls back on Claude quota exhaustion', { timeout: 60_000 }, async () => {
+async function assertRoutingFallback(failure) {
   const previousHome = process.env.SLEEPPILOT_HOME;
   process.env.SLEEPPILOT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-routing-home-'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-routing-project-'));
@@ -114,7 +120,7 @@ test('routing pins manager/developer/reviewer and falls back on Claude quota exh
   await store.saveProject(project);
   const run = newRunRecord({ id: store.newRunId(), project });
   await store.saveRun(run);
-  const claude = new FakeHarness('claude', { failDeveloper: true });
+  const claude = new FakeHarness('claude', { failDeveloper: failure });
   const dsh = new FakeHarness('dsh');
   const api = new FakeHarness('api');
   const manager = { engines: new Map([['claude', claude], ['dsh', dsh], ['api', api]]), get(id) { return this.engines.get(id); }, async connect(id) { return this.engines.get(id); } };
@@ -142,7 +148,11 @@ test('routing pins manager/developer/reviewer and falls back on Claude quota exh
   assert.ok(saved.routingSwitches.some((s) => s.role === 'developer' && s.from === 'claude' && s.to === 'dsh'), 'switch is persisted in the run record');
   assert.ok(saved.sessionRoutes.manager, 'route/session binding is persisted');
   assert.ok(saved.sessionRoutes['developer:T1'], 'developer session route is persisted per task');
-  assert.ok(saved.quota.windows.claude, 'quota window is persisted');
+  if (failure === 'quota') {
+    assert.ok(saved.quota.windows.claude, 'quota window is persisted');
+  } else {
+    assert.ok(!saved.quota?.windows?.claude, 'provider failure does not invent a quota window');
+  }
   assert.ok(fs.readFileSync(path.join(dir, 'fallback.txt'), 'utf8').includes('fallback route worked'));
   assert.ok(ctrl.run.routingSwitches.some((s) => s.role === 'developer' && s.from === 'claude' && s.to === 'dsh'));
   const claudeDev = claude.calls.find((c) => /You are the DEVELOPER/.test(c.text));
@@ -164,11 +174,27 @@ test('routing pins manager/developer/reviewer and falls back on Claude quota exh
   assert.equal(failedTurn.fallbackStep, 0);
   assert.equal(fallbackTurn.harness, 'dsh');
   assert.equal(fallbackTurn.fallbackStep, 1);
-  assert.ok(turns.some((t) => t.role === 'manager' && t.harness === 'api'), 'manager turn continued on the fallback harness');
+  assert.equal(saved.sessionRoutes['developer:T1'].taskId, 'T1');
+  assert.equal(saved.sessionRoutes['developer:T1'].harness, 'dsh');
+  assert.equal(failedTurn.iteration, 1);
+  assert.equal(fallbackTurn.iteration, failedTurn.iteration);
+  assert.equal(claude.calls.filter((c) => /You are the DEVELOPER/.test(c.text)).length, 1);
+  const persistedTurns = await store.readTurns(project.id, run.id);
+  assert.ok(persistedTurns.some((t) => t.role === 'developer' && t.status === 'failed' && t.harness === 'claude'), 'failed turn remains persisted');
+  assert.ok(persistedTurns.some((t) => t.role === 'developer' && t.status === 'succeeded' && t.harness === 'dsh'), 'fallback turn remains persisted');
+  if (failure === 'quota') {
+    assert.ok(turns.some((t) => t.role === 'manager' && t.harness === 'api'), 'manager turn continued on the fallback harness');
+  } else {
+    assert.ok(turns.some((t) => t.role === 'manager' && t.harness === 'claude'), 'provider failure preserves the manager pin');
+  }
   assert.equal(project.settings.rolePins.reviewer.harness, 'api');
   const routes = resolveRoutes({ role: 'developer', taskType: 'coding', harnessRouting: project.settings.harnessRouting, modelProfiles: project.settings.modelProfiles, rolePins: project.settings.rolePins, defaultEngine: 'claude' });
   assert.equal(routes[0].harness, 'claude');
   assert.equal(routes[1].harness, 'dsh');
   if (previousHome === undefined) delete process.env.SLEEPPILOT_HOME;
   else process.env.SLEEPPILOT_HOME = previousHome;
-});
+}
+
+for (const failure of ['quota', 'provider']) {
+  test('routing pins roles and falls back on Claude ' + failure + ' failure', { timeout: 60_000 }, () => assertRoutingFallback(failure));
+}
