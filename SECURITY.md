@@ -20,6 +20,18 @@ SleepPilot is a local, single-user application that drives an AI coding agent wi
 - CSP `default-src 'self'`; all UI text is HTML-escaped.
 - The token is kept in `app-state.json` so a second launch can reopen the window. Any process running as the same user can read it; that is the same trust boundary as the rest of the data folder.
 
+### Phone access (off by default)
+
+Turning on Settings → Phone adds a second listener:
+
+- bound only to the PC's Tailscale address (100.64.0.0/10), never to `0.0.0.0` or the LAN address; requests from peers outside that range are refused;
+- its own random 32-byte token (stored in `phone-access.json`, delivered by the QR code), exchanged for a separate `sp_phone` cookie (`HttpOnly; SameSite=Strict`, one year); the PC's per-launch token does not work there and vice versa;
+- the same Host-header and `X-SleepPilot` checks, with the Tailscale address as the only valid host;
+- API-key endpoints, the folder dialog, closing the app and the phone-access settings are refused from the phone;
+- "Sign out all phones" replaces the token and takes effect immediately.
+
+Traffic is plain HTTP inside the Tailscale tunnel, which is end-to-end encrypted (WireGuard).
+
 ## Network access
 
 SleepPilot is local-first, but it is not offline-only:
@@ -28,7 +40,7 @@ SleepPilot is local-first, but it is not offline-only:
 - **Local AI** — talks to the Ollama endpoint on your machine (`127.0.0.1:11434` by default); no cloud key is required.
 - **CLI engines** — OpenCode, Claude Code, Codex and DSH make their own network calls according to their vendor configuration.
 - **Web fetch tool** — an agent can fetch an HTTP(S) URL you or a task asks it to read.
-- **No telemetry** is sent to the SleepPilot project. The UI server is loopback-only.
+- **No telemetry** is sent to the SleepPilot project. The UI server is loopback-only unless you turn on phone access, which adds a listener on the Tailscale address only.
 
 ## What the agent may do
 

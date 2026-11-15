@@ -6,6 +6,7 @@ import { secret } from '../util/ids.mjs';
 import { redact } from '../util/redact.mjs';
 import { pickFolder } from './folder-picker.mjs';
 import { logger } from '../util/log.mjs';
+import { PhoneAccess, phoneMayCall } from './remote.mjs';
 
 const log = logger('web');
 const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'ui');
@@ -17,8 +18,10 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
  *  - a random per-launch token is exchanged once (?t=…) for an HttpOnly SameSite=Strict cookie;
  *  - the Host header must be the loopback address (blocks DNS-rebinding);
  *  - state-changing requests need the custom header X-SleepPilot (blocks cross-site form posts).
+ * Optional phone access (Settings → Phone) adds a second listener on the Tailscale address only,
+ * with its own long-lived token; see remote.mjs.
  */
-export async function startWebServer(app, { port = 0, token = secret(24) } = {}) {
+export async function startWebServer(app, { port = 0, token = secret(24), phone: phoneOptions = {} } = {}) {
   const clients = new Set();
   app.on('broadcast', (msg) => {
     const line = `data: ${JSON.stringify(msg)}\n\n`;
@@ -33,7 +36,18 @@ export async function startWebServer(app, { port = 0, token = secret(24) } = {})
 
   route('GET', '/api/ping', async () => ({ ok: true, app: 'SleepPilot' }));
   route('POST', '/api/app/close', async () => app.requestClose());
-  route('GET', '/api/state', async () => app.state());
+  route('GET', '/api/state', async (_, __, ___, ctx) => ({ ...(await app.state()), viewer: { phone: !!ctx.remote } }));
+  route('GET', '/api/phone', async () => phone.view());
+  route('POST', '/api/phone', async (_, b) => {
+    await app.saveSettings({ phone: { ...(app.settings.phone || {}), enabled: !!b?.enabled } });
+    await phone.sync();
+    return phone.view();
+  });
+  route('POST', '/api/phone/reset', async () => {
+    // The listener compares against the current token, so old cookies stop working at once.
+    await phone.resetToken();
+    return phone.view();
+  });
   route('POST', '/api/settings', async (_, body) => (await app.saveSettings(body || {}), app.state()));
   route('POST', '/api/engines/:id/connect', async (p) => app.testEngine(p.id));
   route('POST', '/api/opencode/reconnect', async () => (await app.reconnect('opencode'), app.state()));
@@ -80,31 +94,30 @@ export async function startWebServer(app, { port = 0, token = secret(24) } = {})
   route('POST', '/api/runs/:pid/:rid/permission', async (p, b) => (await app.controllerFor(p.rid).replyPermission(b.id, b.decision), { ok: true }));
   route('POST', '/api/runs/:pid/:rid/form', async (p, b) => (await app.controllerFor(p.rid).replyForm(b.id, b.answer), { ok: true }));
 
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req, res, ctx) => {
     try {
-      const addr = server.address();
       const host = String(req.headers.host || '');
-      if (host !== `127.0.0.1:${addr.port}` && host !== `localhost:${addr.port}`) {
+      if (!ctx.hostOk(host)) {
         res.writeHead(421).end('Misdirected request');
         return;
       }
       const url = new URL(req.url, `http://${host}`);
       // Token exchange
       if (url.searchParams.get('t')) {
-        if (url.searchParams.get('t') === token) {
-          res.writeHead(302, { 'set-cookie': `sp_token=${token}; HttpOnly; SameSite=Strict; Path=/`, location: '/' });
-        } else res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('Invalid access token. Restart SleepPilot.');
+        if (ctx.token && url.searchParams.get('t') === ctx.token) {
+          res.writeHead(302, { 'set-cookie': `${ctx.cookie}=${ctx.token}; HttpOnly; SameSite=Strict; Path=/${ctx.maxAge ? `; Max-Age=${ctx.maxAge}` : ''}`, location: '/' });
+        } else res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end(ctx.remote ? 'This phone link is no longer valid. Scan the QR code in SleepPilot → Settings → Phone again.' : 'Invalid access token. Restart SleepPilot.');
         res.end();
         return;
       }
       const cookie = Object.fromEntries(String(req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).filter((x) => x.length === 2));
-      const authed = cookie.sp_token === token;
+      const authed = !!ctx.token && cookie[ctx.cookie] === ctx.token;
       if (url.pathname === '/api/ping') {
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, app: 'SleepPilot' }));
         return;
       }
       if (!authed) {
-        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end('<meta charset="utf-8"><p style="font-family:sans-serif">No access token for this session. Reopen SleepPilot with <b>SleepPilot.cmd</b>.</p>');
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(ctx.remote ? '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><p style="font-family:sans-serif">This phone is not signed in. On the PC open SleepPilot → Settings → Phone and scan the QR code.</p>' : '<meta charset="utf-8"><p style="font-family:sans-serif">No access token for this session. Reopen SleepPilot with <b>SleepPilot.cmd</b>.</p>');
         return;
       }
       if (url.pathname === '/events') {
@@ -119,13 +132,22 @@ export async function startWebServer(app, { port = 0, token = secret(24) } = {})
           res.writeHead(403).end('missing header');
           return;
         }
+        if (ctx.remote && !phoneMayCall(req.method, url.pathname)) {
+          res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'Not available from the phone. Do this on the PC.' }));
+          return;
+        }
         for (const r of routes) {
           if (r.method !== req.method) continue;
           const m = url.pathname.match(r.re);
           if (!m) continue;
-          const body = req.method === 'GET' ? {} : await readBody(req);
+          let body = req.method === 'GET' ? {} : await readBody(req);
+          // Phone access is switched on and off only on the PC.
+          if (ctx.remote && body && typeof body === 'object' && 'phone' in body) {
+            const { phone: _ignored, ...rest } = body;
+            body = rest;
+          }
           const params = Object.fromEntries(Object.entries(m.groups || {}).map(([k, v]) => [k, decodeURIComponent(v)]));
-          const result = await r.handler(params, body, url.searchParams);
+          const result = await r.handler(params, body, url.searchParams, ctx);
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(result ?? null));
           return;
         }
@@ -151,7 +173,13 @@ export async function startWebServer(app, { port = 0, token = secret(24) } = {})
       if (!res.headersSent) res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: redact(err.message) }));
     }
+  };
+  const server = http.createServer((req, res) => {
+    const p = server.address().port;
+    return handle(req, res, { remote: false, token, cookie: 'sp_token', hostOk: (host) => host === `127.0.0.1:${p}` || host === `localhost:${p}` });
   });
+  const phone = new PhoneAccess({ app, handle, ...phoneOptions });
+  server.on('close', () => phone.stop());
   // A stable port keeps per-origin browser state (notification permission, remembered tabs)
   // across launches; if it is taken, any free port is used.
   for (const p of Array.isArray(port) ? port : [port]) {
@@ -166,7 +194,8 @@ export async function startWebServer(app, { port = 0, token = secret(24) } = {})
     if (ok) break;
   }
   const actual = server.address().port;
-  return { server, port: actual, token, url: `http://127.0.0.1:${actual}/?t=${token}` };
+  await phone.sync();
+  return { server, phone, port: actual, token, url: `http://127.0.0.1:${actual}/?t=${token}` };
 }
 
 async function readBody(req) {

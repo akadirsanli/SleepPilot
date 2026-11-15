@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Phone access.** Settings → Phone shows a QR code. Scan it with your phone and
+  you can watch and control runs from the phone: start, pause, stop, steer, answer
+  permissions and questions. It works over [Tailscale](https://tailscale.com), so
+  only your own devices can connect, from home or away; SleepPilot is never
+  opened to the Wi-Fi or the internet. It is off until you turn it on. The phone
+  keeps its sign-in across restarts, and "Sign out all phones" makes a new QR code.
+  The phone cannot see API keys, open dialogs on the PC, close the app or change
+  phone access.
+- A dependency-free QR encoder (`src/util/qr.mjs`).
+
+### Fixed
+
+- On narrow screens, a wide table or long path no longer widens the whole page.
+
 ## 2.4.1 — green CI, Node 20 HTML checks and a sharper public README
 
 ### Fixed

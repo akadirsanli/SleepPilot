@@ -67,6 +67,11 @@ export function defaultSettings() {
       notifications: true,
       reducedMotion: false,
     },
+    // Phone access over Tailscale (Settings → Phone). Off until the user turns it on.
+    phone: {
+      enabled: false,
+      port: 47820,
+    },
   };
 }
 
@@ -157,6 +162,10 @@ export function sanitizeSettings(raw = {}) {
     ui: {
       notifications: r.ui?.notifications !== false,
       reducedMotion: !!r.ui?.reducedMotion,
+    },
+    phone: {
+      enabled: r.phone?.enabled === true,
+      port: Math.round(num(r.phone?.port, d.phone.port, 1024, 65535)),
     },
   };
 }

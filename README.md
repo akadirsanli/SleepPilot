@@ -53,7 +53,8 @@ citations. Model self-reports are recorded as **claims**, never as proof.
 
 ### 🌙 Built to survive the night
 Stall watchdog, crash supervisor, memory guard, durable sessions and quota-aware
-fallback. Failures become recovery paths, not a lost night.
+fallback. Failures become recovery paths, not a lost night. Check in from bed:
+scan a QR code and your phone becomes the remote.
 
 </td>
 <td width="33%" valign="top">

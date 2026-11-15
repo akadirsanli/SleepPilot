@@ -220,6 +220,7 @@ async function loadState() {
   S.state = await api('GET', '/api/state');
   $('#testBanner').hidden = !S.state.app.testMode;
   document.title = S.state.app.testMode ? 'SleepPilot (test mode)' : 'SleepPilot';
+  document.body.classList.toggle('on-phone', !!S.state.viewer?.phone);
   if (S.projectId && !S.state.projects.some((p) => p.id === S.projectId)) S.projectId = null;
   if (!S.projectId && S.state.activeRuns?.length) S.projectId = S.state.activeRuns[0].projectId;
   renderEngineBadge();
@@ -1385,19 +1386,65 @@ async function renderSettings() {
 }
 
 function renderSettingsView() {
-  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', app: 'App' };
+  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', phone: 'Phone', app: 'App' };
   main().innerHTML = `
   <h1>Settings</h1>
   <div class="sub">Local configuration. API keys are stored in a separate credentials file and never shown again.</div>
   <div class="tabs">${Object.entries(tabs).map(([k, v]) => `<button class="tab ${S.settingsTab === k ? 'active' : ''}" data-act="settingsTab" data-tab="${k}">${v}</button>`).join('')}</div>
   <div id="settingsBody">${settingsBodyHtml()}</div>`;
   setActiveNav('settings');
+  if (S.settingsTab === 'phone' && !S.state?.viewer?.phone) loadPhonePanel();
+}
+
+// ------------------------------------------------------------------ phone access
+
+async function loadPhonePanel(view = null) {
+  const box = $('#phonePanel');
+  if (!box) return;
+  try {
+    S.phone = view || (await api('GET', '/api/phone'));
+  } catch (err) {
+    box.innerHTML = `<div class="hint">${esc(err.message)}</div>`;
+    return;
+  }
+  box.innerHTML = phonePanelHtml(S.phone);
+}
+
+function phoneSettingsHtml() {
+  if (S.state?.viewer?.phone) {
+    return `<div class="card flat"><div class="card-head"><h2>Phone</h2></div><p>You are using SleepPilot from your phone. Phone access is turned on, off or reset on the PC.</p></div>`;
+  }
+  return `<div class="card flat"><div class="card-head"><h2>Control SleepPilot from your phone</h2></div><div id="phonePanel"><div class="skeleton" style="height:120px"></div></div></div>`;
+}
+
+function phonePanelHtml(p) {
+  const steps = `<ol class="phone-steps">
+      <li>Install <b>Tailscale</b> on this PC and on your phone (free, <span class="mono">tailscale.com</span>) and sign in with the same account on both.</li>
+      <li>Turn on phone access below. If Windows asks whether Node.js may use the network, allow it.</li>
+      <li>Scan the QR code with the phone camera and add the page to the home screen.</li>
+    </ol>`;
+  const privacy = `<div class="hint" style="margin-top:10px">Only your own Tailscale devices can reach SleepPilot; it is never open to the internet or the Wi-Fi. The phone can watch and control runs and projects, but cannot see API keys, close the app or change phone access.</div>`;
+  if (!p.enabled) {
+    return `${steps}<div class="row" style="margin-top:12px"><button class="btn btn-primary" data-act="phoneEnable">Turn on phone access</button></div>${privacy}`;
+  }
+  let status = '';
+  if (p.listening) status = `<span class="badge badge-ok">On</span> <span class="hint">Listening on <span class="mono">${esc(p.bookmark)}</span></span>`;
+  else if (p.error === 'no-tailscale') status = `<span class="badge badge-warn">Waiting for Tailscale</span> <span class="hint">Tailscale is not running on this PC, or not signed in. SleepPilot checks again every minute.</span>`;
+  else if (p.error === 'port-in-use') status = `<span class="badge badge-bad">Port busy</span> <span class="hint">Port ${esc(p.port)} is used by another program.</span>`;
+  else status = `<span class="badge badge-warn">Not listening</span> <span class="hint">${esc(p.error || 'Starting…')}</span>`;
+  const qr = p.qr
+    ? `<div class="phone-qr-wrap"><div class="phone-qr">${p.qr}</div><div><p><b>Scan with your phone camera.</b> The phone stays signed in; this QR code is the key, so do not share a photo of it.</p>
+        <div class="row"><button class="btn btn-small" data-act="phoneCopyLink">Copy link</button><button class="btn btn-small btn-ghost" data-act="phoneReset">Sign out all phones (new QR code)</button></div></div></div>`
+    : '';
+  return `<div class="row" style="gap:8px;margin-bottom:10px">${status}</div>${qr}${p.listening ? '' : steps}
+    <div class="row" style="margin-top:12px"><button class="btn btn-small" data-act="phoneRefresh">Check again</button><button class="btn btn-small btn-ghost" data-act="phoneDisable">Turn off phone access</button></div>${privacy}`;
 }
 
 function settingsBodyHtml() {
   if (S.settingsTab === 'providers') return providersSettingsHtml();
   if (S.settingsTab === 'local') return localAiSettingsHtml();
   if (S.settingsTab === 'tools') return toolsSettingsHtml();
+  if (S.settingsTab === 'phone') return phoneSettingsHtml();
   if (S.settingsTab === 'app') return appSettingsHtml();
   return enginesSettingsHtml();
 }
@@ -1964,6 +2011,18 @@ const ACTIONS = {
     await loadProject(S.projectId, { keepRun: true });
     renderProject();
   },
+  phoneEnable: async () => loadPhonePanel(await api('POST', '/api/phone', { enabled: true })),
+  phoneDisable: async () => loadPhonePanel(await api('POST', '/api/phone', { enabled: false })),
+  phoneRefresh: async () => loadPhonePanel(await api('POST', '/api/phone', { enabled: true })),
+  phoneReset: async () => {
+    if (!confirm('Every phone that is signed in now has to scan the new QR code. Continue?')) return;
+    await loadPhonePanel(await api('POST', '/api/phone/reset', {}));
+    toast('All phones signed out. Scan the new QR code.');
+  },
+  phoneCopyLink: async () => {
+    if (!S.phone?.url) return;
+    await navigator.clipboard.writeText(S.phone.url).then(() => toast('Link copied. It works like the QR code; keep it private.')).catch(() => toast('Could not access the clipboard.', true));
+  },
   closeApp: async () => {
     const active = S.state?.activeRuns?.length || 0;
     if (active && !confirm(`${active} run(s) are active. Closing SleepPilot stops them after saving their state. Close anyway?`)) return;
@@ -2412,6 +2471,8 @@ function markdown(md) {
 }
 
 document.addEventListener('contextmenu', (e) => {
+  // On the phone a long press opens this menu; its actions (close app/window) belong to the PC.
+  if (S.state?.viewer?.phone) return;
   const tag = e.target?.tagName;
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || e.target?.isContentEditable) return;
   e.preventDefault();

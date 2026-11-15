@@ -131,6 +131,18 @@ Nothing is pushed automatically. If `gh` is missing, the card explains that crea
 
 Closing the browser window does not stop a run. Closing the console window stops SleepPilot. You can also right-click anywhere in the app (not inside an input) for a context menu with **Close SleepPilot**, **Close this window** and **Reload interface**. Closing SleepPilot saves active runs as cleanly stopped, so they will not resume by themselves.
 
+### Control SleepPilot from your phone
+
+Leave the PC on with SleepPilot running and use your phone as the remote.
+
+1. Install [Tailscale](https://tailscale.com) (free) on the PC and on the phone and sign in with the same account on both.
+2. In SleepPilot open **Settings → Phone** and click **Turn on phone access**. If Windows asks whether Node.js may use the network, allow it.
+3. Scan the QR code with the phone camera. Add the page to the home screen; the phone stays signed in.
+
+From the phone you can start runs, pause, stop, add time, steer, edit tasks and answer permissions and questions, at home or away. SleepPilot listens only on the PC's Tailscale address, so it is never reachable from the Wi-Fi or the internet. The phone cannot see or change API keys, open the folder dialog, close SleepPilot or change phone access; do those on the PC.
+
+The QR code is the key: do not share a photo of it. **Sign out all phones** makes a new one. If the page shows *Waiting for Tailscale*, Tailscale is not running or not signed in on the PC; SleepPilot checks again every minute.
+
 ## 6. After the run
 
 The **Report** screen shows:

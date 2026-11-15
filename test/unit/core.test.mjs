@@ -384,3 +384,42 @@ test('tool catalog: version compare, version parsing, and read-only detection sh
   assert.equal(node.status, 'ok');
   assert.match(node.version, /^\d+\.\d+\.\d+$/);
 });
+
+test('phone access helpers: Tailscale address detection and PC-only routes', async () => {
+  const { isTailnetAddress, findTailscaleAddress, phoneMayCall } = await import('../../src/web/remote.mjs');
+  assert.equal(isTailnetAddress('100.101.102.103'), true);
+  assert.equal(isTailnetAddress('::ffff:100.64.0.1'), true);
+  assert.equal(isTailnetAddress('100.128.0.1'), false);
+  assert.equal(isTailnetAddress('192.168.1.20'), false);
+  assert.equal(isTailnetAddress('127.0.0.1'), false);
+  const ifaces = {
+    Ethernet: [{ family: 'IPv4', address: '192.168.1.20', internal: false }],
+    'Other VPN': [{ family: 'IPv4', address: '100.70.0.9', internal: false }],
+    Tailscale: [{ family: 'IPv6', address: 'fd7a:115c::1', internal: false }, { family: 'IPv4', address: '100.101.102.103', internal: false }],
+  };
+  assert.equal(findTailscaleAddress(ifaces), '100.101.102.103');
+  assert.equal(findTailscaleAddress({ Ethernet: ifaces.Ethernet }), null);
+  assert.equal(phoneMayCall('GET', '/api/state'), true);
+  assert.equal(phoneMayCall('POST', '/api/runs/p/r/stop'), true);
+  assert.equal(phoneMayCall('POST', '/api/runs/p/r/permission'), true);
+  for (const p of ['/api/secrets/provider', '/api/pick-folder', '/api/app/close', '/api/phone', '/api/phone/reset']) assert.equal(phoneMayCall('POST', p), false, p);
+  assert.equal(phoneMayCall('GET', '/api/phone'), false);
+});
+
+test('QR encoder: structure and a decoder-verified snapshot', async () => {
+  const { qrMatrix, qrSvg } = await import('../../src/util/qr.mjs');
+  const crypto = await import('node:crypto');
+  const text = 'http://100.101.102.103:47820/?t=abc';
+  const m = qrMatrix(text);
+  assert.equal(m.length, 29, 'version 3');
+  // Finder pattern corners and timing pattern.
+  for (const [x, y] of [[0, 0], [6, 6], [22, 0], [0, 22]]) assert.equal(m[y][x], true);
+  assert.equal(m[1][1], false);
+  assert.deepEqual([8, 9, 10, 11, 12].map((x) => m[6][x]), [true, false, true, false, true]);
+  // This matrix was decoded back to the text with OpenCV's QR decoder when the encoder was written.
+  const hash = crypto.createHash('sha1').update(m.map((r) => r.map(Number).join('')).join('\n')).digest('hex');
+  assert.equal(hash, '80f4f3696161cf2d0b2ceb57cb62a18b5bf5a0b5');
+  assert.equal(qrMatrix('x'.repeat(213)).length, 57, 'version 10 at the 213-byte limit');
+  assert.throws(() => qrMatrix('x'.repeat(214)), /too long/);
+  assert.match(qrSvg(text), /^<svg [^>]*viewBox="0 0 37 37"/);
+});
