@@ -36,7 +36,9 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
 
   route('GET', '/api/ping', async () => ({ ok: true, app: 'SleepPilot' }));
   route('POST', '/api/app/close', async () => app.requestClose());
-  route('GET', '/api/state', async (_, __, ___, ctx) => ({ ...(await app.state()), viewer: { phone: !!ctx.remote } }));
+  // Every response that replaces the UI's state says whether it is shown on the phone.
+  const stateFor = async (ctx) => ({ ...(await app.state()), viewer: { phone: !!ctx?.remote } });
+  route('GET', '/api/state', async (_, __, ___, ctx) => stateFor(ctx));
   route('GET', '/api/phone', async () => phone.view());
   route('POST', '/api/phone', async (_, b) => {
     await app.saveSettings({ phone: { ...(app.settings.phone || {}), enabled: !!b?.enabled } });
@@ -48,9 +50,9 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
     await phone.resetToken();
     return phone.view();
   });
-  route('POST', '/api/settings', async (_, body) => (await app.saveSettings(body || {}), app.state()));
+  route('POST', '/api/settings', async (_, body, __, ctx) => (await app.saveSettings(body || {}), stateFor(ctx)));
   route('POST', '/api/engines/:id/connect', async (p) => app.testEngine(p.id));
-  route('POST', '/api/opencode/reconnect', async () => (await app.reconnect('opencode'), app.state()));
+  route('POST', '/api/opencode/reconnect', async (_, __, ___, ctx) => (await app.reconnect('opencode'), stateFor(ctx)));
   route('POST', '/api/secrets/provider', async (_, body) => app.saveProviderSecret(body || {}));
   route('POST', '/api/secrets/env', async (_, body) => app.saveEnvSecret(body || {}));
   route('GET', '/api/usage-limits', async (_, __, q) => app.usageLimits(q.get('projectId')));

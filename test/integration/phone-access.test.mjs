@@ -84,7 +84,9 @@ test('phone access: off by default, Tailscale-only listener, own token, PC-only 
       assert.equal((await phone(m, p, {})).status, 403, `${m} ${p} is refused from the phone`);
     }
     // The phone cannot switch phone access off through the general settings call either.
-    assert.equal((await phone('POST', '/api/settings', { phone: { enabled: false }, maxConcurrentRuns: 4 })).status, 200);
+    const saved = await phone('POST', '/api/settings', { phone: { enabled: false }, maxConcurrentRuns: 4 });
+    assert.equal(saved.status, 200);
+    assert.equal(JSON.parse(saved.body).viewer.phone, true, 'the saved state still knows it is shown on the phone');
     assert.equal(app.settings.phone.enabled, true);
     assert.equal(app.settings.maxConcurrentRuns, 4);
 
