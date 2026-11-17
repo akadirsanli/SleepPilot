@@ -1,4 +1,4 @@
-import { ExternalCliEngine, findExternalCli } from '../external-cli/engine.mjs';
+import { ExternalCliEngine, findExternalCli, signedInFromText } from '../external-cli/engine.mjs';
 import { runFile } from '../../util/proc.mjs';
 
 /** Codex config vocabulary for `model_reasoning_effort`. */
@@ -37,7 +37,8 @@ export class CodexEngine extends ExternalCliEngine {
     const a = await runFile(found.path, ['login', 'status'], { timeoutMs: 30_000 }).catch(() => null);
     if (a) {
       const text = `${a.stdout || ''}${a.stderr || ''}`.trim();
-      auth = { loggedIn: /logged in/i.test(text) ? true : /not logged in|logged out/i.test(text) ? false : null, label: text.split('\n')[0].slice(0, 160) || 'sign-in status unknown' };
+      const loggedIn = signedInFromText(text);
+      auth = { loggedIn, label: loggedIn === false ? 'not signed in — run `codex login`' : text.split('\n')[0].slice(0, 160) || 'sign-in status unknown' };
     }
     const models = [{ id: 'default', name: 'Codex default model' }];
     if (this.cli.model && this.cli.model !== 'default') models.unshift({ id: this.cli.model, name: this.cli.model });

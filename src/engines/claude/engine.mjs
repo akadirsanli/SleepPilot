@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ExternalCliEngine, findExternalCli, authHint, classifyForEngine } from '../external-cli/engine.mjs';
+import { ExternalCliEngine, findExternalCli, authHint, classifyForEngine, signedInFromText } from '../external-cli/engine.mjs';
 import { runFile } from '../../util/proc.mjs';
 import { parseResetHint } from '../../orchestrator/quota-tracker.mjs';
 
@@ -55,15 +55,7 @@ export class ClaudeEngine extends ExternalCliEngine {
     if (!found.found) return found;
     let auth = { loggedIn: null, label: 'sign-in status unknown' };
     const a = await runFile(found.path, ['auth', 'status'], { timeoutMs: 30_000 }).catch(() => null);
-    if (a) {
-      const text = `${a.stdout || ''}${a.stderr || ''}`.trim();
-      try {
-        const j = JSON.parse(text);
-        auth = { loggedIn: !!j.loggedIn, label: j.loggedIn ? `signed in${j.authMethod && j.authMethod !== 'none' ? ` (${j.authMethod})` : ''}` : 'not signed in — run `claude auth login`' };
-      } catch {
-        auth = { loggedIn: /logged in|signed in/i.test(text) ? true : /not logged in|logged out/i.test(text) ? false : null, label: text.split('\n')[0].slice(0, 160) || 'sign-in status unknown' };
-      }
-    }
+    if (a) auth = parseClaudeAuthStatus(`${a.stdout || ''}${a.stderr || ''}`);
     const models = [
       { id: 'default', name: 'Claude default model' },
       { id: 'sonnet', name: 'Claude Sonnet (alias)' },
@@ -174,6 +166,20 @@ export function claudeQuotaFromText(text) {
     message: message.slice(0, 1000),
     source: 'claude-cli',
   };
+}
+
+/** Read `claude auth status` output (JSON, possibly with other lines around it, or plain text). */
+export function parseClaudeAuthStatus(output) {
+  const text = String(output || '').trim();
+  const json = text.match(/\{[\s\S]*\}/)?.[0];
+  if (json) {
+    try {
+      const j = JSON.parse(json);
+      if (typeof j.loggedIn === 'boolean') return { loggedIn: j.loggedIn, label: j.loggedIn ? `signed in${j.authMethod && j.authMethod !== 'none' ? ` (${j.authMethod})` : ''}` : 'not signed in — run `claude auth login`' };
+    } catch {}
+  }
+  const loggedIn = signedInFromText(text);
+  return { loggedIn, label: loggedIn === false ? 'not signed in — run `claude auth login`' : text.split('\n')[0].slice(0, 160) || 'sign-in status unknown' };
 }
 
 export function claudeAuthHint(message) {
