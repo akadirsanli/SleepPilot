@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { newProvider, normalizeProvider } from './engines/api/providers.mjs';
 
 export const ENGINE_IDS = ['opencode', 'claude', 'codex', 'api', 'dsh', 'cli'];
@@ -72,6 +73,16 @@ export function defaultSettings() {
       enabled: false,
       port: 47820,
     },
+    // The folder in which SleepPilot creates new projects (Settings → Workspace). null = not set up.
+    workspace: {
+      dir: null,
+    },
+    // Android build toolchain paths. Empty = auto-detect (Android Studio's JDK and SDK).
+    android: {
+      jdkHome: null,
+      sdkDir: null,
+      gradlePath: null,
+    },
   };
 }
 
@@ -100,6 +111,11 @@ const num = (v, fallback, min, max) => {
 };
 
 const strOrNull = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+/** An absolute path, or null (relative paths would depend on where SleepPilot was started). */
+const absOrNull = (v) => {
+  const s = strOrNull(v);
+  return s && (path.isAbsolute(s) || /^[a-zA-Z]:[\\/]/.test(s)) ? s.slice(0, 1000) : null;
+};
 
 export function sanitizeSettings(raw = {}) {
   const d = defaultSettings();
@@ -166,6 +182,14 @@ export function sanitizeSettings(raw = {}) {
     phone: {
       enabled: r.phone?.enabled === true,
       port: Math.round(num(r.phone?.port, d.phone.port, 1024, 65535)),
+    },
+    workspace: {
+      dir: absOrNull(r.workspace?.dir),
+    },
+    android: {
+      jdkHome: absOrNull(r.android?.jdkHome),
+      sdkDir: absOrNull(r.android?.sdkDir),
+      gradlePath: absOrNull(r.android?.gradlePath),
     },
   };
 }

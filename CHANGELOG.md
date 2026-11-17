@@ -4,6 +4,34 @@
 
 ### Added
 
+- **Workspace.** Settings → Workspace (or the Home card) chooses one folder for all
+  projects. SleepPilot keeps `projects/<name>/` and `exports/<name>/` inside it; a
+  new project then needs only a name, and folder names are made safe for build
+  tools (`Yarış Oyunu` → `yaris-oyunu`). Folders copied in by hand can be opened as
+  projects with one click.
+- **Live preview.** The new Preview screen shows a project's web app in a phone,
+  tablet or desktop frame while the agent writes it. Static pages reload on every
+  saved file and their JavaScript errors appear in a console panel; bundler
+  projects (Vite, Next.js, …) run their own dev server after you approve the
+  command. A run starts the static preview by itself, and finished projects can be
+  previewed at any time.
+- **Android APKs.** The new Android screen detects Android Studio's JDK and SDK
+  (no PATH or system-variable changes), builds debug/release APKs and Play Store
+  bundles with a live log, explains failed builds, inspects the produced APK
+  (package, version, SDK levels, ABIs, signature), copies it to the workspace's
+  `exports/` folder, creates and keeps a release signing key, installs and starts
+  the app on a USB-connected phone and shows its error log. APKs can be downloaded
+  straight to the phone over phone access. Gradle can be downloaded on request
+  (SHA-256 verified).
+- **Android build check.** After each task the Gradle build runs; a task is only
+  verified when an APK is produced.
+- **Project templates:** web app, native Kotlin Android app, HTML/JS app in an
+  Android shell (previewed live, packaged as an APK), libGDX 3D Android game.
+  Each comes with an `AGENTS.md`, the checks that prove the work and pinned
+  versions. See [docs/ANDROID.md](docs/ANDROID.md).
+- Scout and the toolchain screen recognise Android projects, Android Studio, the
+  Android SDK, adb and Gradle.
+
 - **Phone access.** Settings → Phone shows a QR code. Scan it with your phone and
   you can watch and control runs from the phone: start, pause, stop, steer, answer
   permissions and questions. It works over [Tailscale](https://tailscale.com), so
@@ -16,6 +44,10 @@
 
 ### Fixed
 
+- **Claude Code / Codex sign-in status.** A plain-text "Not logged in" was read as
+  *signed in* because it contains "logged in". The engine now shows "not signed
+  in", and the pause message says how to sign in (`claude auth login`, then
+  `claude auth status`).
 - On narrow screens, a wide table or long path no longer widens the whole page.
 
 ## 2.4.1 — green CI, Node 20 HTML checks and a sharper public README

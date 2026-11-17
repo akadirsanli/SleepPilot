@@ -16,10 +16,21 @@ export const settingsFile = () => path.join(dataRoot(), 'settings.json');
 export const credentialsFile = () => path.join(dataRoot(), 'credentials.json');
 export const appStateFile = () => path.join(dataRoot(), 'app-state.json');
 export const engineSessionsDir = (engineId = 'api') => path.join(dataRoot(), 'engine-sessions', engineId);
+/** Tools SleepPilot downloaded on the user's request (e.g. a Gradle distribution). */
+export const toolsDir = () => path.join(dataRoot(), 'tools');
+/** Release keystores created for Android projects. Never stored inside a project folder. */
+export const androidKeysDir = () => path.join(dataRoot(), 'android-keys');
 
 /** Case-insensitive, separator-normalised form of a Windows path, used for identity comparisons. */
 export function normalizeDir(p) {
   let r = path.resolve(p).replace(/[\\/]+$/, '');
   if (process.platform === 'win32') r = r.toLowerCase();
   return r;
+}
+
+/** True when `child` is `parent` or lies inside it (after resolving; case-insensitive on Windows). */
+export function isInside(parent, child) {
+  const a = normalizeDir(parent);
+  const b = normalizeDir(child);
+  return b === a || b.startsWith(a + path.sep);
 }

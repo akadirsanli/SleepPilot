@@ -184,6 +184,8 @@ JSON is written atomically (temp file + rename, retries for Windows locks). Pers
 - State-changing requests need `X-SleepPilot: 1` (cross-site form defence).
 - CSP `default-src 'self'`; all UI text is escaped.
 - API keys are never included in `/api/state`; the UI sees only `hasKey`.
+- File downloads (APK/AAB) are limited to `.apk`/`.aab` files inside the project or its exports folder.
+- From the phone listener, choosing the workspace folder, approving a preview command and downloading Gradle are refused (PC-only).
 
 ## Staying alive
 
@@ -192,6 +194,17 @@ JSON is written atomically (temp file + rename, retries for Windows locks). Pers
 3. **Stall watchdog** (unattended): no progress for `stallLimitMs` interrupts the turn; a second stall asks the supervisor for a restart.
 4. **Single instance** lock: a second launch reopens the existing window and never takes over running work.
 5. **Memory guard**: saves runs and restarts before V8’s uncatchable OOM.
+
+## Workspace, preview and Android
+
+- `src/workspace/workspace.mjs` — the workspace layout (`projects/`, `exports/`, marker, README), safe folder names, the Home/Settings view.
+- `src/preview/preview.mjs` — `StaticPreview` (read-only file server on its own loopback port; live reload over SSE; an injected client script reports page errors to the UI with `postMessage`, checked against the preview's origin), `CommandPreview` (an approved dev-server command; the URL is read from its output) and `PreviewManager` (one preview per project). The UI page allows only `frame-src http://127.0.0.1:* http://localhost:*`.
+- `src/android/toolchain.mjs` — read-only JDK/SDK/Gradle/adb detection with fixes for every missing piece; the shared, cached result also exports `JAVA_HOME`/`ANDROID_HOME` to processes SleepPilot starts (only when the user has not set them).
+- `src/android/project.mjs` — Gradle project discovery (also in `android/` sub-folders), APK/AAB inspection with a small ZIP reader (`src/util/zip.mjs`) and a binary `AndroidManifest.xml` parser.
+- `src/android/templates.mjs` — the project templates; never overwrites a file.
+- `src/android/build.mjs` — the build runner (wrapper → detected/downloaded Gradle), failure diagnosis, export, `keytool` signing, `gradle wrapper`, the SHA-256-checked Gradle download and `adb`. On macOS/Linux the wrapper jar is started with the detected `java` directly: a POSIX shell drops environment variables whose names contain dots (`ORG_GRADLE_PROJECT_android.injected.signing.*`), which carry the signing passwords without putting them on the command line.
+- `src/android/service.mjs` — per-project builds (one at a time, streamed to the UI), signing keys (keystore in `android-keys/`, password in the credential store), devices.
+- The `android-build` check type (`src/checks/runner.mjs`) runs the same build after a task; a missing toolchain is an environment error, not a failed task.
 
 ## Reverse & Rust
 

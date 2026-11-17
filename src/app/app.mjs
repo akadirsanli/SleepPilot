@@ -26,7 +26,12 @@ import { detectGitHub, pushProject, createRepository, ensureGitRepo } from '../g
 import { ScoutAgent } from '../scout/scout.mjs';
 import { REVERSE_MODES } from '../reverse/playbook.mjs';
 import { KeepAwake } from './keep-awake.mjs';
-import { dataRoot } from '../util/paths.mjs';
+import { dataRoot, isInside } from '../util/paths.mjs';
+import { initWorkspace, newProjectDir, projectFolderName, validateWorkspaceDir, workspaceExportsDir, workspaceView } from '../workspace/workspace.mjs';
+import { PreviewManager, detectPreview, effectivePreview, sanitizePreviewConfig } from '../preview/preview.mjs';
+import { AndroidService } from '../android/service.mjs';
+import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
+import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
 import { logger } from '../util/log.mjs';
 
 const log = logger('app');
@@ -54,6 +59,8 @@ export class SleepPilotApp extends EventEmitter {
     });
     this.controllers = new Map(); // runId -> RunController
     this.keepAwake = new KeepAwake();
+    this.previews = new PreviewManager();
+    this.android = new AndroidService({ credentials: this.credentials, exportDirFor: (p) => this.exportDirFor(p) });
   }
 
   /** The engine of the default (most recently selected) backend. Kept for compatibility. */
@@ -65,11 +72,20 @@ export class SleepPilotApp extends EventEmitter {
     const stored = await this.store.getSettings().catch(() => ({}));
     this.settings = sanitizeGlobalSettings({ ...defaultSettings(), ...stored });
     this.manager.applySettings(this.settings);
+    configureAndroid(this.settings.android);
+    await this.credentials.load().catch(() => {});
     await this.manager.init();
+    this.previews.on('update', (u) => this.emit('broadcast', { type: 'preview', data: u }));
+    this.android.on('update', (u) => this.emit('broadcast', { type: 'android-build', data: u }));
+    this.android.on('toolchain', (u) => this.emit('broadcast', { type: 'android-toolchain', data: u }));
     this.manager.on('status', () => this.emit('broadcast', { type: 'engines', data: this.enginesView() }));
     this.manager.on('stream', (s) => this.emit('broadcast', { type: 'stream', data: s }));
     if (this.recover) await this.recoverRuns();
-    if (this.autoConnect) this.manager.connectDefault().catch((err) => log.error(`connect failed: ${err.message}`));
+    if (this.autoConnect) {
+      this.manager.connectDefault().catch((err) => log.error(`connect failed: ${err.message}`));
+      // Finds Android Studio's JDK/SDK once, so agent turns can run gradlew without PATH changes.
+      cachedAndroidToolchain().catch((err) => log.warn(`android toolchain detection failed: ${err.message}`));
+    }
   }
 
   enginesView() {
@@ -242,14 +258,17 @@ export class SleepPilotApp extends EventEmitter {
     const activeList = this.activeControllers();
     const active = activeList[0] || null;
     return {
-      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.4.1', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.5.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      workspace: { dir: this.settings.workspace?.dir || null, configured: !!this.settings.workspace?.dir },
+      templates: Object.values(PROJECT_TEMPLATES).map((t) => ({ id: t.id, label: t.label, android: t.android })),
+      previews: this.previews.running().map((p) => ({ projectId: p.projectId, url: p.url, mode: p.mode, state: p.state })),
       engines: this.enginesView(),
       opencode: this.opencodeView(),
       settings: this.settings,
       profiles: PROFILES,
       taskStatusLabels: TASK_STATUS_LABELS,
       defaults: DEFAULT_PROJECT_SETTINGS,
-      projects: projects.map((p) => ({ id: p.id, name: p.name, dir: p.dir, updatedAt: p.updatedAt, objective: p.objective, lastRunId: p.lastRunId, kind: p.kind || 'code', reverse: p.reverse ? { targetDir: p.reverse.targetDir, mode: p.reverse.mode } : null })),
+      projects: projects.map((p) => ({ id: p.id, name: p.name, dir: p.dir, updatedAt: p.updatedAt, objective: p.objective, lastRunId: p.lastRunId, kind: p.kind || 'code', template: p.template || null, inWorkspace: !!this.settings.workspace?.dir && isInside(this.settings.workspace.dir, p.dir), reverse: p.reverse ? { targetDir: p.reverse.targetDir, mode: p.reverse.mode } : null })),
       activeRuns: activeList.map((c) => ({
         projectId: c.project.id,
         projectName: c.project.name,
@@ -280,6 +299,7 @@ export class SleepPilotApp extends EventEmitter {
     this.toolsCache = null;
     await this.store.saveSettings(this.settings);
     this.manager.applySettings(this.settings);
+    configureAndroid(this.settings.android);
     this.emit('broadcast', { type: 'engines', data: this.enginesView() });
     return this.settings;
   }
@@ -312,14 +332,36 @@ export class SleepPilotApp extends EventEmitter {
     return this.enginesView();
   }
 
-  async createProject({ name, dir, createIfMissing, engine, template }) {
-    if (!dir || !path.isAbsolute(dir)) throw new Error('An absolute folder path is required.');
+  async createProject({ name, dir, createIfMissing, engine, template, applicationId, addWrapper = false }) {
+    const tpl = template && template !== 'blank' ? PROJECT_TEMPLATES[template] : null;
+    if (template && template !== 'blank' && !tpl) throw new Error(`Unknown template: ${template}`);
+    let createdHere = false;
+    if (!dir) {
+      // With a workspace, a name is enough: the folder is <workspace>/projects/<name>.
+      const ws = this.settings.workspace?.dir;
+      if (!ws) throw new Error('Choose a folder, or set up a workspace (Settings → Workspace) so SleepPilot can create project folders for you.');
+      if (!String(name || '').trim()) throw new Error('Enter a project name.');
+      await initWorkspace(ws);
+      dir = await newProjectDir(ws, name);
+      createIfMissing = true;
+    }
+    if (!path.isAbsolute(dir)) throw new Error('An absolute folder path is required.');
     const st = await fsp.stat(dir).catch(() => null);
     if (!st) {
-      if (!createIfMissing) throw new Error('Folder not found. For a new project, tick "create the folder".');
+      if (!createIfMissing && !tpl) throw new Error('Folder not found. For a new project, tick "create the folder".');
       await fsp.mkdir(dir, { recursive: true });
+      createdHere = true;
     } else if (!st.isDirectory()) throw new Error('The selected path is not a folder.');
     const chosen = ENGINE_IDS.includes(engine) ? engine : this.settings.engine;
+    let scaffold = null;
+    if (tpl && tpl.id !== 'rust') {
+      try {
+        scaffold = await scaffoldTemplate(dir, tpl.id, { name: name || path.basename(dir), applicationId });
+      } catch (err) {
+        if (createdHere) await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+        throw err;
+      }
+    }
     const project = await this.store.createProject({ name, dir });
     project.settings.engine = chosen;
     project.settings.models = modelsFor(this.manager.get(chosen), project.settings.models);
@@ -332,10 +374,170 @@ export class SleepPilotApp extends EventEmitter {
         { id: 'cargo-check', type: 'cargo', name: 'cargo check', cargo: 'check', enabled: !!scaffold.cargo?.found, approved: true },
         { id: 'cargo-test', type: 'cargo', name: 'cargo test', cargo: 'test', enabled: !!scaffold.cargo?.found, approved: true },
       ];
+    } else if (scaffold) {
+      project.kind = scaffold.kind;
+      project.template = scaffold.template;
+      if (scaffold.applicationId) project.android = { applicationId: scaffold.applicationId, module: scaffold.module };
+      if (!project.rules) project.rules = scaffold.rules;
+      const known = new Set((project.checks || []).map((c) => c.id));
+      project.checks = sanitizeChecks([...(project.checks || []), ...scaffold.checks.filter((c) => !known.has(c.id))]);
+      if (scaffold.preview) project.preview = sanitizePreviewConfig({ ...scaffold.preview, autoStart: true });
     }
     await this.store.saveProject(project);
     await this.inspect(project.id);
+    if (scaffold?.kind === 'android' && addWrapper) {
+      // Best effort and in the background: builds also work without a wrapper.
+      this.android.addWrapper(project).then(() => log.info(`gradle wrapper added to ${project.id}`)).catch((err) => log.info(`gradle wrapper not added: ${err.message}`));
+    }
     return this.store.getProject(project.id);
+  }
+
+  // ------------------------------------------------------------------ workspace
+
+  async workspaceInfo() {
+    const projects = await this.store.listProjects();
+    return workspaceView(this.settings.workspace?.dir || null, { projects });
+  }
+
+  /** Choose (and create) the workspace folder. Existing projects stay where they are. */
+  async setWorkspace({ dir } = {}) {
+    if (!dir) {
+      await this.saveSettings({ workspace: { dir: null } });
+      return this.workspaceInfo();
+    }
+    const root = await initWorkspace(validateWorkspaceDir(dir));
+    await this.saveSettings({ workspace: { dir: root } });
+    return this.workspaceInfo();
+  }
+
+  /** Register a folder under <workspace>/projects that has no SleepPilot project yet. */
+  async openWorkspaceFolder({ folder, engine } = {}) {
+    const ws = this.settings.workspace?.dir;
+    if (!ws) throw new Error('No workspace is set up.');
+    const name = String(folder || '');
+    if (!name || name !== path.basename(name) || name.startsWith('.')) throw new Error('Invalid folder name.');
+    const dir = path.join(ws, 'projects', name);
+    const st = await fsp.stat(dir).catch(() => null);
+    if (!st?.isDirectory()) throw new Error('That folder does not exist in the workspace.');
+    return this.createProject({ name, dir, engine });
+  }
+
+  /** Where built APK/AABs of a project are copied: <workspace>/exports/<folder>, else SleepPilot's data folder. */
+  exportDirFor(project) {
+    const ws = this.settings.workspace?.dir;
+    if (ws) return workspaceExportsDir(ws, path.basename(project.dir));
+    return path.join(dataRoot(), 'exports', projectFolderName(project.id));
+  }
+
+  // ------------------------------------------------------------------ preview
+
+  async previewInfo(projectId) {
+    const project = await this.requireProject(projectId);
+    const detected = await detectPreview(project.dir);
+    const config = sanitizePreviewConfig(project.preview || {});
+    return { projectId, config, detected, effective: effectivePreview(config, detected), view: this.previews.view(projectId) };
+  }
+
+  async savePreviewConfig(projectId, patch = {}) {
+    const project = await this.requireProject(projectId);
+    const before = sanitizePreviewConfig(project.preview || {});
+    const next = sanitizePreviewConfig({ ...before, ...patch });
+    // Approval belongs to one exact command: changing the command withdraws it.
+    if (next.command !== before.command && patch.commandApproved !== true) next.commandApproved = false;
+    project.preview = next;
+    await this.store.saveProject(project);
+    return this.previewInfo(projectId);
+  }
+
+  async startPreview(projectId) {
+    const project = await this.requireProject(projectId);
+    const info = await this.previewInfo(projectId);
+    await this.previews.start(project, info.effective);
+    return this.previewInfo(projectId);
+  }
+
+  async stopPreview(projectId) {
+    await this.previews.stop(projectId);
+    return this.previewInfo(projectId);
+  }
+
+  /** Start the live preview with a run when the project has static pages (read-only, no project code runs). */
+  async autoStartPreview(project) {
+    const config = sanitizePreviewConfig(project.preview || {});
+    if (config.autoStart === false || config.mode === 'off' || this.previews.view(project.id).running) return;
+    const plan = effectivePreview(config, await detectPreview(project.dir));
+    if (plan.mode !== 'static') return;
+    await this.previews.start(project, plan).catch((err) => log.info(`preview not started: ${err.message}`));
+  }
+
+  // ------------------------------------------------------------------ android
+
+  async requireProject(projectId) {
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new Error('Project not found.');
+    return project;
+  }
+
+  async androidToolchain({ force = false } = {}) {
+    const { summarizeToolchain } = await import('../android/service.mjs');
+    return { toolchain: summarizeToolchain(await this.android.toolchain({ force })), download: this.android.downloadView(), settings: this.settings.android };
+  }
+
+  async androidProject(projectId) {
+    return this.android.project(await this.requireProject(projectId));
+  }
+
+  async androidBuild(projectId, opts = {}) {
+    return this.android.startBuild(await this.requireProject(projectId), opts);
+  }
+
+  async androidCancelBuild(projectId) {
+    return this.android.cancelBuild(projectId);
+  }
+
+  async androidCreateKey(projectId, opts = {}) {
+    return this.android.createSigningKey(await this.requireProject(projectId), opts);
+  }
+
+  async androidDevices() {
+    return this.android.devices();
+  }
+
+  async androidInstall(projectId, opts = {}) {
+    return this.android.install(await this.requireProject(projectId), opts);
+  }
+
+  async androidDeviceErrors(projectId, opts = {}) {
+    return this.android.deviceErrors(await this.requireProject(projectId), opts);
+  }
+
+  async androidAddWrapper(projectId) {
+    return this.android.addWrapper(await this.requireProject(projectId));
+  }
+
+  androidDownloadGradle(opts = {}) {
+    return this.android.startGradleDownload(opts);
+  }
+
+  /** The "Android build" check for a project that does not have one yet. */
+  async androidAddCheck(projectId) {
+    const project = await this.requireProject(projectId);
+    const info = await this.android.project(project);
+    if (!info.info.appModule) throw new Error('No Android application module was found in this project.');
+    if (!(project.checks || []).some((c) => c.type === 'android-build')) {
+      const module = info.info.appModule.name;
+      project.checks = sanitizeChecks([...(project.checks || []), { id: 'android-build', type: 'android-build', name: `Android build (${module ? `:${module}:` : ''}assembleDebug)`, module, variant: 'debug', enabled: true, approved: true, timeoutSec: 2400 }]);
+      if (!project.kind || project.kind === 'code') project.kind = 'android';
+      await this.store.saveProject(project);
+    }
+    return project.checks;
+  }
+
+  /** An APK/AAB of the project as a file response (download to the phone or the PC). */
+  async androidArtifactFile(projectId, file) {
+    const project = await this.requireProject(projectId);
+    const full = await this.android.resolveArtifact(project, file);
+    return { __file: full, name: path.basename(full), type: /\.aab$/i.test(full) ? 'application/octet-stream' : 'application/vnd.android.package-archive' };
   }
 
   /**
@@ -526,6 +728,7 @@ export class SleepPilotApp extends EventEmitter {
     project.lastRunId = run.id;
     await this.store.saveProject(project);
     await this.store.saveRun(run);
+    this.autoStartPreview(project).catch(() => {});
     // A cooldown guessed after an earlier run's error must not block a run started by hand
     // (e.g. after the user switched to a model their plan covers). Real reset windows stay.
     this.quotaTracker.clearGuessed();
@@ -733,6 +936,8 @@ export class SleepPilotApp extends EventEmitter {
 
   async shutdown() {
     this.keepAwake.set(false);
+    await this.previews.stopAll().catch(() => {});
+    await this.android.cancelAll().catch(() => {});
     for (const t of this.recoveryTimers || []) clearTimeout(t);
     // A clean shutdown is the user's decision: the next start must not continue the run by itself.
     for (const c of this.controllers.values()) {
@@ -838,13 +1043,15 @@ function decorateScout(scout, { scope = null, allTools = null, kind = scout.kind
 export function sanitizeChecks(list) {
   return (Array.isArray(list) ? list : []).slice(0, 30).map((c, i) => ({
     id: String(c.id || `custom-${i + 1}`).slice(0, 60),
-    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo'].includes(c.type) ? c.type : 'command',
+    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build'].includes(c.type) ? c.type : 'command',
     name: String(c.name || c.command || c.cargo || 'Check').slice(0, 120),
     command: c.type === 'command' || !c.type ? String(c.command || '').slice(0, 1000) : undefined,
     cargo: c.type === 'cargo' ? ['check', 'test', 'build', 'clippy', 'fmt'].includes(String(c.cargo || '').split(/\s+/)[0]) ? String(c.cargo).slice(0, 100) : 'check' : undefined,
     entries: Array.isArray(c.entries) ? c.entries.map(String).slice(0, 10) : undefined,
     minBytes: c.type === 'doc-check' ? num(c.minBytes, { min: 0, max: 10_000_000, allowNull: false }) ?? 300 : undefined,
     interpreter: c.type === 'py-syntax' && c.interpreter ? String(c.interpreter).slice(0, 400) : undefined,
+    module: c.type === 'android-build' && c.module != null ? String(c.module).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    variant: c.type === 'android-build' ? (c.variant === 'release' ? 'release' : 'debug') : undefined,
     enabled: !!c.enabled,
     approved: c.type === 'command' || !c.type ? !!c.approved : true,
     suggested: !!c.suggested,

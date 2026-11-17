@@ -68,9 +68,9 @@ Keys are stored in `credentials.json` under the SleepPilot data folder (mode `06
 
 **Home → New project**
 
-- **Folder** — an existing project folder or a new empty folder. Tick *Create the folder* if needed.
+- **Folder** — an existing project folder or a new empty folder. Tick *Create the folder* if needed. With a **workspace** (Settings → Workspace) the folder is optional: the project is created in `<workspace>/projects/<name>`.
 - **Engine** — the backend for this project.
-- **Template** — *Existing / blank folder* or *New Rust project*. The Rust template writes a working Cargo crate (library + CLI + acceptance tests), runs `cargo check` when cargo is available and enables `cargo check` / `cargo test` checks.
+- **Template** — *Existing / blank folder*, *Web app*, *New Rust project* or one of the Android templates (native Kotlin, HTML/JS in an Android shell, libGDX 3D game). The Rust template writes a working Cargo crate (library + CLI + acceptance tests), runs `cargo check` when cargo is available and enables `cargo check` / `cargo test` checks. Web and Android templates add a page-load check or the Android build check, an `AGENTS.md` for the agent and the preview settings — see [ANDROID.md](ANDROID.md).
 
 Opening the same folder again reuses its project record. Each project’s runs, reports and configuration are stored separately.
 
@@ -130,6 +130,14 @@ Nothing is pushed automatically. If `gh` is missing, the card explains that crea
 - If *Review the plan before starting* is enabled, the run pauses after planning; review the task list and click **Approve plan and start**.
 
 Closing the browser window does not stop a run. Closing the console window stops SleepPilot. You can also right-click anywhere in the app (not inside an input) for a context menu with **Close SleepPilot**, **Close this window** and **Reload interface**. Closing SleepPilot saves active runs as cleanly stopped, so they will not resume by themselves.
+
+### Live preview
+
+The **Preview** screen shows the project's web app while the agent writes it (phone, tablet, desktop or full size) and reloads on every saved file; JavaScript errors appear in its console panel. A run starts the static preview by itself. Projects built by a bundler (Vite, Next.js, …) run their own dev server after you approve the command. Details: [ANDROID.md](ANDROID.md#live-preview).
+
+### Android
+
+The **Android** screen builds APKs and Play Store bundles, explains build errors, signs release builds, installs the app on a USB-connected phone and lets the phone download the APK. Details: [ANDROID.md](ANDROID.md#android-builds).
 
 ### Control SleepPilot from your phone
 

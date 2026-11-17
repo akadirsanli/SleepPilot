@@ -237,6 +237,23 @@ Full schema and fallback semantics: **[docs/ROUTING.md](docs/ROUTING.md)**.
 
 </details>
 
+## 📲 From idea to APK — with a live preview
+
+Pick a template (web app, native Kotlin app, HTML app in an Android shell, libGDX 3D game) and
+give it a name: SleepPilot creates the project in your **workspace** folder, and the agent starts
+working.
+
+- **Watch it being built.** The Preview screen shows the web app in a phone, tablet or desktop
+  frame and reloads on every saved file. JavaScript errors land in a console panel.
+- **Every task must build.** For Android projects the real Gradle build runs after each task; no
+  APK, no "verified".
+- **Install it in the morning.** Build debug/release APKs or a Play Store bundle, sign them with a
+  key SleepPilot keeps for you, install and start the app on a USB phone, or download the APK
+  straight to your phone.
+
+No Android setup puzzle: Android Studio's JDK and SDK are found automatically, and every missing
+piece comes with the exact fix. Details: **[docs/ANDROID.md](docs/ANDROID.md)**.
+
 ## 🦀 Sleep & Reverse & Rust It
 
 Point SleepPilot at a program you are authorized to inspect. Overnight it builds a
@@ -400,6 +417,7 @@ More in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 | Document | What is inside |
 |---|---|
 | [USAGE](docs/USAGE.md) | Install, first run, presets, steering, phone remote, recovery, CLI |
+| [ANDROID](docs/ANDROID.md) | Workspace, project templates, live preview, APK builds, signing, devices |
 | [ENGINES](docs/ENGINES.md) | Engine contract, providers, Claude/Codex/DSH setup |
 | [ROUTING](docs/ROUTING.md) | Role pins, model profiles, effort, quota fallback |
 | [REVERSE](docs/REVERSE.md) | Reverse & Rust: recon, evidence, Rust rules |
