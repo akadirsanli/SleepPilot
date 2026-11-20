@@ -1055,6 +1055,7 @@ export function sanitizeSettings(s) {
     improvementMode: !!s.improvementMode,
     autoResumeOnQuotaReset: !!s.autoResumeOnQuotaReset,
     reviewerEnabled: s.reviewerEnabled !== false,
+    secondOpinion: s.secondOpinion !== false,
     sessionPolicy: ['fresh-per-task', 'fresh-per-iteration'].includes(s.sessionPolicy) ? s.sessionPolicy : 'fresh-per-task',
     permissionProfile: normalizeProfile(s.permissionProfile),
     backupBeforeRun: s.backupBeforeRun !== false,

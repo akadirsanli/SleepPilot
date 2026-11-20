@@ -125,6 +125,17 @@ function managerReply(text, session) {
   return '```json\n{}\n```';
 }
 
+/** SLEEPPILOT_FAKE_SECOND_OPINION = retry (default) | split | give_up | garbage */
+function secondOpinionReply(text) {
+  const mode = process.env.SLEEPPILOT_FAKE_SECOND_OPINION || 'retry';
+  if (mode === 'garbage') return 'I think it is fine.';
+  const reason = (text.match(/Why you were called: ([^.]*)/) || [])[1] || '?';
+  const base = { diagnosis: `fake second opinion: ${reason}`, root_cause: mode === 'split' ? 'too_big' : 'approach', advice: 'FAKE-ADVICE: fix the syntax error in broken.js', recommendation: mode };
+  if (mode === 'split') base.subtasks = [{ title: 'Fake part one', description: 'ACTION: write part1.txt one', acceptance: ['ok'] }, { title: 'Fake part two', description: 'ACTION: write part2.txt two', acceptance: ['ok'] }];
+  if (mode === 'give_up') base.give_up_reason = 'fake: the tool it needs is not installed';
+  return '```json\n' + JSON.stringify(base) + '\n```';
+}
+
 function reviewerReply(text = '') {
   // SLEEPPILOT_FAKE_REVIEW_SCREENSHOTS=1: the reviewer asks to see the page once, then judges it.
   if (process.env.SLEEPPILOT_FAKE_REVIEW_SCREENSHOTS === '1' && /SCREENSHOTS \(only if you need them\)/.test(text)) {
@@ -278,6 +289,7 @@ async function execute(session) {
       if (/SleepPilot model check/.test(text)) reply = 'OK';
       else if (/FACTS MEASURED BY SLEEPPILOT/.test(text)) reply = `FAKE closing report (test double).\n${(text.match(/Net change since the run started: [^\n]*/) || [''])[0]}`;
       else if (/You are the MANAGER/.test(text) || /could not be parsed/.test(text)) reply = managerReply(text, session);
+      else if (/You are a SECOND-OPINION ENGINEER/.test(text)) reply = secondOpinionReply(text);
       else if (/You are the REVIEWER/.test(text) || /SleepPilot took the screenshots you asked for/.test(text)) {
         if (REVIEW_MS && (!REVIEW_MATCH || REVIEW_MATCH.test(text))) await sleep(REVIEW_MS);
         reply = reviewerReply(text);

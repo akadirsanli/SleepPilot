@@ -280,6 +280,45 @@ Reply with ONLY a JSON object in a \`\`\`json fenced block:
 \`\`\``;
 }
 
+const STUCK_REASONS = {
+  same_failure: 'the same check failure happened again after a repair attempt',
+  repeated_failure: 'the same failure repeated until the attempt limit; the task was about to be given up',
+  loop: 'the last attempts changed no files although the task is not done (the developer is going in circles)',
+  stalled: 'the developer turn showed no progress for a long time and was stopped (a command that never returned or waited for input?)',
+  timeout: 'the developer turn exceeded the per-turn time limit and was stopped',
+};
+
+/** A different engine diagnoses a stuck task (read-only) and tells the developer how to get unstuck. */
+export function secondOpinionPrompt({ objective, task, reason, attempts = [], lastChecks = [], developerSummary = '', changedFiles = [], fromEngine = '' }) {
+  const fence = '```';
+  return `You are a SECOND-OPINION ENGINEER called in by SleepPilot because a coding agent is stuck. You are read-only: you may read the project files, but never edit them.
+Why you were called: ${STUCK_REASONS[reason] || reason}.${fromEngine ? ` The developer runs on ${fromEngine}; look at the problem with fresh eyes.` : ''}
+
+OBJECTIVE (version ${objective.version}):
+${String(objective.text || '').slice(0, 4000)}
+
+TASK [${task.id}]: ${task.title}
+${String(task.description || '').slice(0, 3000)}
+Acceptance criteria:
+${(task.acceptance || []).map((a) => `- ${a}`).join('\n') || '- (none)'}
+${task.files?.length ? `Files in scope: ${task.files.join(', ')}\n` : ''}
+ATTEMPTS SO FAR (newest last):
+${attempts.slice(-6).map((a) => `- #${a.n}: ${String(a.summary || '').slice(0, 400)}${a.failedChecks ? `\n  failed checks: ${String(a.failedChecks).slice(-1200)}` : ''}${a.reviewIssues ? `\n  reviewer: ${String(a.reviewIssues).slice(0, 400)}` : ''}`).join('\n') || '- (none recorded)'}
+
+LAST CHECK RESULTS:
+${lastChecks.map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' && c.output ? ` — ${String(c.output).slice(-1500)}` : ''}`).join('\n') || '- none'}
+
+LAST DEVELOPER REPORT (a claim, not evidence):
+${String(developerSummary || '(none)').slice(-2500)}
+${changedFiles.length ? `\nFiles changed in the last attempt: ${changedFiles.slice(0, 40).join(', ')}\n` : ''}
+Read the relevant files, then find the ROOT CAUSE: a wrong approach, a misunderstood requirement, an environment problem (missing tool, wrong path, a command that waits for input), a check that cannot pass as written, or a task that is too big for one step.
+Reply with ONLY a JSON object in a ${fence}json fenced block:
+${fence}json
+{"diagnosis": "what is really going wrong (concrete: file, line, command, error)", "root_cause": "approach | requirement | environment | check | too_big | other", "advice": "exact instructions for the developer's next attempt: what to change, in which files, what to avoid", "recommendation": "retry | split | give_up", "subtasks": [{"title": "...", "description": "...", "acceptance": ["..."]}], "give_up_reason": "only for give_up: why no further attempt can succeed"}
+${fence}
+Use "split" (with 2-4 subtasks) only when the task is too big; "give_up" only when the task cannot succeed in this environment.`;
+}
+
 /** Second reviewer turn after SleepPilot took the screenshots the reviewer asked for. */
 export function reviewScreenshotsPrompt({ files = [], missing = [] }) {
   return `SleepPilot took the screenshots you asked for (real browser, after the page settled):

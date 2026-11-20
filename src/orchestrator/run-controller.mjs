@@ -72,8 +72,8 @@ export function stallLimitMs(limits = {}) {
 const WATCHDOG_MS = Number(process.env.SLEEPPILOT_WATCHDOG_MS || 15_000);
 const OPEN_STATUSES = new Set(['pending', 'test_failed', 'in_progress', 'waiting_user']);
 /** Run limits that may be changed while a run is going (see applyLiveSettings). */
-export const LIVE_LIMIT_KEYS = ['maxTurnMin', 'overtimeMin', 'overtimeMaxRounds', 'parallelDevelopers', 'durationMin', 'maxIterations', 'maxAttemptsSameFailure', 'maxTokens', 'maxCostUsd', 'improvementMode', 'autoResumeOnQuotaReset', 'reviewerEnabled', 'permissionProfile', 'unattended', 'permissionTimeoutMin', 'scopeMode', 'closingReport', 'language', 'finalGraceMin', 'protectedPaths'];
-const LIVE_LABELS = { maxTurnMin: 'Per-turn time limit (min)', overtimeMin: 'Overtime (min)', overtimeMaxRounds: 'Overtime rounds', parallelDevelopers: 'Parallel developers', durationMin: 'Duration (min)', maxIterations: 'Max iterations', maxAttemptsSameFailure: 'Same-failure attempts', maxTokens: 'Token limit', maxCostUsd: 'Cost limit', improvementMode: 'Improvement mode', autoResumeOnQuotaReset: 'Auto-resume after quota reset', reviewerEnabled: 'Reviewer', permissionProfile: 'Permission profile', unattended: 'Unattended', permissionTimeoutMin: 'Permission timeout', scopeMode: 'Scope', closingReport: 'Closing report', language: 'Report language', finalGraceMin: 'Final answer wait', protectedPaths: 'Protected paths' };
+export const LIVE_LIMIT_KEYS = ['secondOpinion', 'maxTurnMin', 'overtimeMin', 'overtimeMaxRounds', 'parallelDevelopers', 'durationMin', 'maxIterations', 'maxAttemptsSameFailure', 'maxTokens', 'maxCostUsd', 'improvementMode', 'autoResumeOnQuotaReset', 'reviewerEnabled', 'permissionProfile', 'unattended', 'permissionTimeoutMin', 'scopeMode', 'closingReport', 'language', 'finalGraceMin', 'protectedPaths'];
+const LIVE_LABELS = { secondOpinion: 'Second opinion', maxTurnMin: 'Per-turn time limit (min)', overtimeMin: 'Overtime (min)', overtimeMaxRounds: 'Overtime rounds', parallelDevelopers: 'Parallel developers', durationMin: 'Duration (min)', maxIterations: 'Max iterations', maxAttemptsSameFailure: 'Same-failure attempts', maxTokens: 'Token limit', maxCostUsd: 'Cost limit', improvementMode: 'Improvement mode', autoResumeOnQuotaReset: 'Auto-resume after quota reset', reviewerEnabled: 'Reviewer', permissionProfile: 'Permission profile', unattended: 'Unattended', permissionTimeoutMin: 'Permission timeout', scopeMode: 'Scope', closingReport: 'Closing report', language: 'Report language', finalGraceMin: 'Final answer wait', protectedPaths: 'Protected paths' };
 const fmtSetting = (v) => (v === null || v === undefined || v === '' ? 'none/unlimited' : v === true ? 'on' : v === false ? 'off' : Array.isArray(v) ? `${v.length} item(s)` : String(v));
 
 class ProviderFailure extends Error {
@@ -113,6 +113,7 @@ export function newRunRecord({ id, project, previousRun = null }) {
       improvementMode: s.improvementMode,
       autoResumeOnQuotaReset: s.autoResumeOnQuotaReset,
       reviewerEnabled: s.reviewerEnabled,
+      secondOpinion: s.secondOpinion !== false,
       sessionPolicy: s.sessionPolicy,
       permissionProfile: s.permissionProfile,
       models: s.models,
@@ -1142,6 +1143,125 @@ export class RunController extends EventEmitter {
   }
 
   /** Options every role prompt receives: scope discipline, sleep mode, report language. */
+  /**
+   * Why a task looks stuck after this evaluation, or null. At most two second opinions per task,
+   * and never twice for the same failure.
+   */
+  stuckReason(task, evaluation, changes) {
+    const changed = changes ? changes.added.length + changes.modified.length + changes.deleted.length : 1;
+    task.noChangeStreak = changed ? 0 : (task.noChangeStreak || 0) + 1;
+    if (this.run.limits.secondOpinion === false || (task.consults || 0) >= 2) return null;
+    const sig = task.failureSignatures?.at(-1) || null;
+    const consulted = (task.consultedSigs || []).includes(sig);
+    if (evaluation.status === 'blocked' && task.blockedReason === 'repeated_failure' && !task.rescued) return 'repeated_failure';
+    if (evaluation.status === 'test_failed' && sig && !consulted && task.failureSignatures.filter((s) => s === sig).length >= 2) return 'same_failure';
+    if (task.noChangeStreak >= 2 && ['pending', 'test_failed', 'implemented_unverified'].includes(evaluation.status)) return 'loop';
+    return null;
+  }
+
+  /** A read-only engine other than the developer's when one is connected; else a fresh reviewer session. */
+  consultantRoute(devHarness) {
+    const usable = (h) => h && this.readOnlyCapable(h) && this.quota.canUse(h).ok;
+    try {
+      for (const r of this.routesFor('reviewer', 'review')) if (r.harness !== devHarness && usable(r.harness)) return { ...r, fresh: true };
+    } catch {}
+    for (const e of this.engineManager?.engines?.values() || []) {
+      if (e.connected && e.id !== devHarness && usable(e.id)) return { harness: e.id, modelProfile: null, model: null, effort: null, fallbackStep: 0, fresh: true };
+    }
+    try {
+      return { ...this.routeFor('reviewer', 'review'), fresh: false };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Second opinion: another engine (read-only) reads the attempts, checks and files of a stuck
+   * task and says what is really wrong. Its advice goes into the developer's next prompt; it can
+   * also split the task, give one more round to a task that was about to be blocked, or give up
+   * on a task that cannot succeed here. Optional and never fatal: on any error the run goes on.
+   */
+  async secondOpinion(task, reason, n, { iteration = null, developerSummary = '', changedFiles = [], lastChecks = [] } = {}) {
+    const devHarness = task.devHarness || this.adapter?.id || null;
+    const route = this.consultantRoute(devHarness);
+    if (!route) return null;
+    task.consults = (task.consults || 0) + 1;
+    if (task.failureSignatures?.length) (task.consultedSigs ||= []).push(task.failureSignatures.at(-1));
+    const label = this.engineManager?.get?.(route.harness)?.label || route.harness;
+    const why = { same_failure: 'the same failure came back', repeated_failure: 'it was about to be given up', loop: 'the last attempts changed nothing', stalled: 'the developer stalled', timeout: 'the developer ran out of time' }[reason] || reason;
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion on [${task.id}] from ${label}${route.fresh ? '' : ' (same engine, fresh session)'}: ${why}.` });
+    this.setActivity('reviewer', `#${n} · second opinion on [${task.id}] from ${label}…`, { taskId: task.id, iteration: n });
+    try {
+      const { session } = await this.createRoleSession('reviewer', route, { title: `SleepPilot · ${this.project.name} · second opinion · ${task.id}`, task });
+      this.sessionHarness.set(session.id, { ...route, sessionID: session.id });
+      const prompt = P.secondOpinionPrompt({ objective: this.project.objective, task, reason, attempts: task.attemptLog || [], lastChecks, developerSummary, changedFiles, fromEngine: route.fresh ? devHarness : '' });
+      const rt = await this.roleTurn('reviewer', session.id, prompt, { iterationN: n, task, tag: 'second opinion', taskType: 'review' });
+      const j = extractJson(rt.finalText || rt.allText);
+      if (!j || (!j.diagnosis && !j.advice)) {
+        this.addLog({ kind: 'warning', role: 'reviewer', text: `The second opinion on [${task.id}] could not be read; the run continues without it.` });
+        return null;
+      }
+      const op = {
+        at: Date.now(),
+        iteration: n,
+        reason,
+        engine: route.harness,
+        diagnosis: String(j.diagnosis || '').slice(0, 1500),
+        rootCause: String(j.root_cause || '').split(/[\s|]/)[0].slice(0, 40),
+        advice: String(j.advice || '').slice(0, 2500),
+        recommendation: ['retry', 'split', 'give_up'].includes(String(j.recommendation || '').split(/[\s|]/)[0]) ? String(j.recommendation).split(/[\s|]/)[0] : 'retry',
+      };
+      (task.secondOpinions ||= []).push(op);
+      if (iteration) iteration.secondOpinion = op;
+      this.applySecondOpinion(task, op, j, n);
+      return op;
+    } catch (err) {
+      if (err instanceof Interrupted) return null;
+      this.addLog({ kind: 'warning', role: 'reviewer', text: `Second opinion not available (${label}): ${redact(String(err.message || err)).slice(0, 300)}. The run continues.` });
+      return null;
+    }
+  }
+
+  applySecondOpinion(task, op, j, n) {
+    const head = `Diagnosis: ${op.diagnosis}${op.rootCause ? ` (root cause: ${op.rootCause})` : ''}`;
+    if (op.recommendation === 'split' && Array.isArray(j.subtasks) && j.subtasks.length >= 2 && !['verified', 'cancelled'].includes(task.status)) {
+      const subs = j.subtasks.slice(0, 4).map((s, i) => ({
+        title: String(s.title || `Part ${i + 1} of ${task.title}`),
+        description: `${String(s.description || '')}
+
+Part of the original task [${task.id}] ${task.title}. ${op.advice ? `Advice from the second opinion: ${op.advice}` : ''}`,
+        acceptance: Array.isArray(s.acceptance) ? s.acceptance : [],
+        priority: task.priority,
+        files: task.files,
+        type: task.type,
+        depends_on: i ? [i] : [],
+      }));
+      const added = this.addTasks(subs, { createdBy: 'second-opinion' });
+      if (added.length) {
+        setTaskStatus(task, 'cancelled', `Split into ${added.map((t) => `[${t.id}]`).join(', ')} after a second opinion. ${head}`, n);
+        this.addLog({ kind: 'plan', role: 'reviewer', text: `Second opinion: [${task.id}] is too big; split into ${added.map((t) => `[${t.id}] ${t.title}`).join(', ')}.` });
+        return;
+      }
+    }
+    if (op.recommendation === 'give_up' && j.give_up_reason) {
+      setTaskStatus(task, 'blocked', `Second opinion: this cannot succeed here — ${String(j.give_up_reason).slice(0, 600)}. ${head}`, n);
+      task.blockedReason = 'second_opinion';
+      this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion: [${task.id}] cannot succeed here — ${String(j.give_up_reason).slice(0, 300)}` });
+      return;
+    }
+    task.recoveryNote = `SECOND OPINION (another engine looked at why this task is stuck). ${head}
+Do this now: ${op.advice || 'take a different approach than in the previous attempts.'}`;
+    if (task.status === 'blocked' && task.blockedReason === 'repeated_failure' && !task.rescued) {
+      // One more round with the new advice before giving up for good.
+      task.rescued = true;
+      task.blockedReason = null;
+      task.failureSignatures = [];
+      task.timeouts = 0;
+      setTaskStatus(task, 'pending', `One more attempt with a second opinion. ${head}`, n);
+    }
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion on [${task.id}]: ${op.diagnosis.slice(0, 300)}${op.advice ? ` → ${op.advice.slice(0, 200)}` : ''}` });
+  }
+
   /** HTML pages the reviewer may ask to see; empty when no browser is installed (no offer then). */
   async screenshotPages() {
     if (this.run.screenshotsUnavailable) return [];
@@ -1929,6 +2049,9 @@ export class RunController extends EventEmitter {
         if (task.timeouts >= (run.limits.maxAttemptsSameFailure || 3)) {
           setTaskStatus(task, 'blocked', `The developer turn ${stalled ? 'stalled / showed no progress' : 'exceeded the per-turn time limit'} ${task.timeouts} times; task blocked.`, n);
           task.blockedReason = 'repeated_failure';
+        } else if (run.limits.secondOpinion !== false && (task.consults || 0) < 2 && !this.control?.stop && !this.control?.pause) {
+          // The first hang/timeout already gets a diagnosis: hangs tend to repeat.
+          await this.secondOpinion(task, stalled ? 'stalled' : 'timeout', n, { iteration });
         }
       }
       await this.saveIterationState(iteration);
@@ -2009,6 +2132,10 @@ export class RunController extends EventEmitter {
     iteration.status = 'completed';
     iteration.endedAt = Date.now();
     this.addLog({ kind: 'evaluation', text: `Evaluation #${n}: [${task.id}] → ${evaluation.label}. ${evaluation.note}` });
+    // Stuck (same failure again, about to be given up, or going in circles): another engine
+    // diagnoses it before the next attempt.
+    const stuck = !recovered && !timeUp ? this.stuckReason(task, evaluation, changes) : null;
+    if (stuck) await this.secondOpinion(task, stuck, n, { iteration, developerSummary: turn.finalText, changedFiles, lastChecks: iteration.checks });
     await this.saveIterationState(iteration);
 
     if (recovered || timeUp) return;

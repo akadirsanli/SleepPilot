@@ -15,6 +15,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
   improvementMode: false,
   autoResumeOnQuotaReset: false,
   reviewerEnabled: true,
+  // Ask a different engine for a diagnosis when a task fails repeatedly, stalls or loops.
+  secondOpinion: true,
   sessionPolicy: 'fresh-per-task',
   permissionProfile: 'balanced',
   backupBeforeRun: true,

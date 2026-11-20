@@ -677,6 +677,7 @@ function renderProject() {
       </div>
       <div class="grid grid-3" style="margin-top:8px">
         <label class="check"><input type="checkbox" id="fReviewer" ${s.reviewerEnabled !== false ? 'checked' : ''}> Reviewer enabled</label>
+        <label class="check" title="When a task fails the same way twice, stalls, or loops without changing files, another engine (read-only) diagnoses it and advises the developer."><input type="checkbox" id="fSecondOpinion" ${s.secondOpinion !== false ? 'checked' : ''}> Second opinion when stuck</label>
         <label class="check"><input type="checkbox" id="fClosing" ${s.closingReport !== false ? 'checked' : ''}> Closing report</label>
         <label class="check"><input type="checkbox" id="fBackup" ${s.backupBeforeRun !== false ? 'checked' : ''}> Backup before run</label>
         <label class="check"><input type="checkbox" id="fCarry" ${s.carryOverTasks !== false ? 'checked' : ''}> Carry over open tasks</label>
@@ -842,6 +843,7 @@ function readSetup() {
     permissionProfile: $('#fProfile')?.value || 'balanced',
     unattended: !!$('#fUnattended')?.checked,
     reviewerEnabled: !!$('#fReviewer')?.checked,
+    secondOpinion: !!$('#fSecondOpinion')?.checked,
     closingReport: !!$('#fClosing')?.checked,
     backupBeforeRun: !!$('#fBackup')?.checked,
     carryOverTasks: !!$('#fCarry')?.checked,
