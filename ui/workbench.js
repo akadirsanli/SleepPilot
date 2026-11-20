@@ -593,3 +593,102 @@ export function onTemplateChange() {
   const create = $('#npCreate');
   if (create && tpl !== 'blank') create.checked = true;
 }
+
+// ------------------------------------------------------------------ MCP servers (Settings → MCP)
+
+export async function loadMcp() {
+  WB.mcp = await api('GET', '/api/mcp');
+  return WB.mcp;
+}
+
+export function mcpSettingsHtml() {
+  const m = WB.mcp;
+  if (!m) return '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  const engineLabel = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+  const row = (s, i) => `<div class="engine-card" data-mcp="${i}">
+    <div class="engine-head">
+      <label class="check" style="margin:0"><input type="checkbox" data-f="enabled" ${s.enabled ? 'checked' : ''}> <b>${esc(s.name)}</b></label>
+      <span class="hint mono">${esc(s.url || [s.command, ...(s.args || [])].join(' '))}</span>
+      <span class="spacer"></span>
+      <button class="btn btn-small btn-ghost" data-act="mcpRemove" data-i="${i}">Remove</button>
+    </div>
+    <div class="grid grid-2" style="margin-top:8px">
+      <div><label>Command or URL</label><input type="text" data-f="target" value="${esc(s.url || [s.command, ...(s.args || [])].join(' '))}"></div>
+      <div><label>Who may use it</label><select data-f="roles"><option value="developer" ${s.roles !== 'all' ? 'selected' : ''}>Developer only</option><option value="all" ${s.roles === 'all' ? 'selected' : ''}>All roles (manager and reviewer stay read-only)</option></select></div>
+    </div>
+    <div class="row" style="margin-top:6px">${Object.entries(engineLabel).map(([id, l]) => `<label class="check" style="margin:0"><input type="checkbox" data-engine="${id}" ${s.engines?.includes(id) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+    <label>Environment variables it needs (names, comma-separated)</label>
+    <input type="text" data-f="env" value="${esc((s.env || []).join(', '))}" placeholder="e.g. GITHUB_TOKEN">
+    ${(s.env || []).length ? `<div class="hint">${s.env.map((n) => `${esc(n)}: ${m.envSet?.includes(n) ? '<span style="color:var(--ok)">set</span>' : `<span style="color:var(--warn)">not set</span> <a href="#" data-act="mcpSetEnv" data-name="${esc(n)}">set value…</a>`}`).join(' · ')}</div>` : ''}
+  </div>`;
+  return `<div class="card flat">
+    <div class="card-head"><h2>MCP servers for the agents</h2><span class="hint">Claude Code, Codex and OpenCode</span></div>
+    <p class="sub" style="margin:0 0 10px">MCP servers give the coding agents extra tools: a real browser, current library documentation, GitHub and more. One list for all projects. Secrets (tokens) are stored in SleepPilot's credential file, never in the settings. Changes apply from the next agent turn; OpenCode restarts by itself when no run is active.</p>
+    ${(m.servers || []).map(row).join('') || '<div class="empty">No MCP server yet.</div>'}
+    <div class="row" style="margin-top:10px">
+      ${(m.presets || []).filter((p) => !(m.servers || []).some((s) => s.name === p.name)).map((p) => `<button class="btn btn-small" data-act="mcpAddPreset" data-id="${esc(p.id)}" title="${esc(p.label)}">+ ${esc(p.label.split(' — ')[0])}</button>`).join('')}
+      <button class="btn btn-small" data-act="mcpAddCustom">+ Custom server</button>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" data-act="mcpSave">Save</button>
+    </div>
+    <div class="hint" style="margin-top:8px">Local servers usually start with <span class="mono">npx</span> (Node.js) and download on first use. "Developer only" is the safe default: the manager and reviewer stay read-only either way.</div>
+  </div>`;
+}
+
+function readMcpForm() {
+  return [...document.querySelectorAll('[data-mcp]')].map((card) => {
+    const i = Number(card.dataset.mcp);
+    const prev = WB.mcp.servers[i] || {};
+    const target = card.querySelector('[data-f="target"]').value.trim();
+    const isUrl = /^https?:\/\//i.test(target);
+    const parts = target.match(/"[^"]*"|\S+/g)?.map((p) => p.replace(/^"|"$/g, '')) || [];
+    return {
+      name: prev.name,
+      enabled: card.querySelector('[data-f="enabled"]').checked,
+      ...(isUrl ? { url: target } : { command: parts[0] || '', args: parts.slice(1) }),
+      roles: card.querySelector('[data-f="roles"]').value,
+      engines: [...card.querySelectorAll('[data-engine]')].filter((c) => c.checked).map((c) => c.dataset.engine),
+      env: card.querySelector('[data-f="env"]').value.split(/[,\s]+/).filter(Boolean),
+    };
+  });
+}
+
+Object.assign(WB_ACTIONS, {
+  mcpAddPreset: async (el) => {
+    const p = WB.mcp.presets.find((x) => x.id === el.dataset.id);
+    if (!p) return;
+    WB.mcp.servers = [...readMcpForm(), { name: p.name, enabled: true, command: p.command, args: p.args, env: p.env, roles: p.roles, engines: WB.mcp.engines }];
+    rerender();
+  },
+  mcpAddCustom: async () => {
+    const name = prompt('Name of the MCP server (letters, digits, - and _):', 'myserver');
+    if (!name) return;
+    const target = prompt('Command (e.g. npx -y some-mcp-server) or URL (https://…):', '');
+    if (!target) return;
+    const isUrl = /^https?:\/\//i.test(target.trim());
+    const parts = target.trim().split(/\s+/);
+    WB.mcp.servers = [...readMcpForm(), { name: name.trim(), enabled: true, ...(isUrl ? { url: target.trim() } : { command: parts[0], args: parts.slice(1) }), env: [], roles: 'developer', engines: WB.mcp.engines }];
+    rerender();
+  },
+  mcpRemove: async (el) => {
+    const list = readMcpForm();
+    list.splice(Number(el.dataset.i), 1);
+    WB.mcp.servers = list;
+    rerender();
+  },
+  mcpSave: async () => {
+    const before = WB.mcp.servers.length;
+    WB.mcp = await api('POST', '/api/mcp', { servers: readMcpForm() });
+    toast(WB.mcp.servers.length < before ? 'Saved. Entries without a valid name or command were dropped.' : 'MCP servers saved.', WB.mcp.servers.length < before);
+    rerender();
+  },
+  mcpSetEnv: async (el) => {
+    const name = el.dataset.name;
+    const value = prompt(`Value for ${name} (stored in SleepPilot's credential file, never shown again):`);
+    if (!value) return;
+    await api('POST', '/api/secrets/env', { name, value });
+    await loadMcp();
+    toast(`${name} saved.`);
+    rerender();
+  },
+});

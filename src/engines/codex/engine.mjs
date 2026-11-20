@@ -1,3 +1,4 @@
+import { serversFor, codexMcpArgs } from '../../mcp/mcp.mjs';
 import { ExternalCliEngine, findExternalCli, signedInFromText } from '../external-cli/engine.mjs';
 import { runFile } from '../../util/proc.mjs';
 
@@ -43,6 +44,10 @@ export class CodexEngine extends ExternalCliEngine {
     const models = [{ id: 'default', name: 'Codex default model' }];
     if (this.cli.model && this.cli.model !== 'default') models.unshift({ id: this.cli.model, name: this.cli.model });
     return { ...found, auth, models };
+  }
+
+  async mcpArgs({ readOnly }) {
+    return codexMcpArgs(serversFor(this.settings, { engine: 'codex', readOnly, getEnv: (n) => this.credentials?.getEnv(n) || '' }));
   }
 
   buildArgs({ session, readOnly, profile }) {

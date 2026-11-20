@@ -96,6 +96,9 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
   route('POST', '/api/runs/:pid/:rid/steer', async (p, b) => app.controllerFor(p.rid).steer({ text: b.text, mode: b.mode }));
   route('POST', '/api/runs/:pid/:rid/permission', async (p, b) => (await app.controllerFor(p.rid).replyPermission(b.id, b.decision), { ok: true }));
   route('POST', '/api/runs/:pid/:rid/form', async (p, b) => (await app.controllerFor(p.rid).replyForm(b.id, b.answer), { ok: true }));
+  // MCP servers for the agents
+  route('GET', '/api/mcp', async () => app.mcpView());
+  route('POST', '/api/mcp', async (_, b) => app.saveMcp(b || {}));
   // Assistant (chat box)
   route('GET', '/api/assistant', async (_, __, q) => app.assistantView({ projectId: q.get('projectId'), runId: q.get('runId') }));
   route('POST', '/api/assistant/ask', async (_, b) => app.assistantAsk(b || {}));

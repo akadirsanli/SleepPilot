@@ -35,7 +35,7 @@ export function findTailscaleAddress(interfaces = os.networkInterfaces()) {
 export function phoneMayCall(method, pathname) {
   if (method === 'GET') return !pathname.startsWith('/api/phone');
   // Also PC-only: choosing the workspace folder and approving a preview command (it runs project code).
-  return !/^\/api\/(secrets\/|pick-folder$|app\/close$|phone|workspace$|projects\/[^/]+\/preview\/config$|android\/gradle\/download$)/.test(pathname);
+  return !/^\/api\/(secrets\/|pick-folder$|app\/close$|phone|workspace$|projects\/[^/]+\/preview\/config$|android\/gradle\/download$|mcp$)/.test(pathname);
 }
 
 const tokenFile = () => path.join(dataRoot(), 'phone-access.json');

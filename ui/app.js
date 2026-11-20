@@ -2,7 +2,7 @@
 import { morph } from './dom.js';
 import { initAssistant, assistantRefresh, assistantEvent } from './assistant.js';
 import { initChat, CHAT, chatReset, chatLoad, chatApply, chatTurnFinished, chatSchedule, chatRender, chatPanelHtml } from './chat.js';
-import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange } from './workbench.js';
+import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange, loadMcp, mcpSettingsHtml } from './workbench.js';
 
 const S = {
   state: null,
@@ -1467,7 +1467,7 @@ async function renderSettings() {
 }
 
 function renderSettingsView() {
-  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', workspace: 'Workspace', android: 'Android', phone: 'Phone', app: 'App' };
+  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', workspace: 'Workspace', android: 'Android', mcp: 'MCP', phone: 'Phone', app: 'App' };
   main().innerHTML = `
   <h1>Settings</h1>
   <div class="sub">Local configuration. API keys are stored in a separate credentials file and never shown again.</div>
@@ -1476,6 +1476,7 @@ function renderSettingsView() {
   setActiveNav('settings');
   if (S.settingsTab === 'phone' && !S.state?.viewer?.phone) loadPhonePanel();
   if (S.settingsTab === 'workspace' && !WB.workspace) loadWorkspace().then(() => S.view === 'settings' && S.settingsTab === 'workspace' && renderSettingsView()).catch(() => {});
+  if (S.settingsTab === 'mcp' && !WB.mcp) loadMcp().then(() => S.view === 'settings' && S.settingsTab === 'mcp' && renderSettingsView()).catch(() => {});
   if (S.settingsTab === 'android' && !WB.androidTc) loadAndroid(null).then(() => S.view === 'settings' && S.settingsTab === 'android' && renderSettingsView()).catch(() => {});
 }
 
@@ -1532,6 +1533,7 @@ function settingsBodyHtml() {
   if (S.settingsTab === 'phone') return phoneSettingsHtml();
   if (S.settingsTab === 'workspace') return workspaceSettingsHtml();
   if (S.settingsTab === 'android') return androidSettingsHtml();
+  if (S.settingsTab === 'mcp') return mcpSettingsHtml();
   if (S.settingsTab === 'app') return appSettingsHtml();
   return enginesSettingsHtml();
 }

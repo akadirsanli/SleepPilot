@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { newProvider, normalizeProvider } from './engines/api/providers.mjs';
 import { sanitizeAssistantSettings } from './assistant/assistant.mjs';
+import { sanitizeMcpSettings } from './mcp/mcp.mjs';
 
 export const ENGINE_IDS = ['opencode', 'claude', 'codex', 'api', 'dsh', 'cli'];
 
@@ -85,6 +86,10 @@ export function defaultSettings() {
       jdkHome: null,
       sdkDir: null,
       gradlePath: null,
+    },
+    // MCP servers for the coding agents (Settings → MCP). Environment values live in credentials.
+    mcp: {
+      servers: [],
     },
     // In-app assistant (chat box): up to three { engine, model } choices, tried in order.
     assistant: {
@@ -201,5 +206,6 @@ export function sanitizeSettings(raw = {}) {
       gradlePath: absOrNull(r.android?.gradlePath),
     },
     assistant: sanitizeAssistantSettings(r.assistant, ENGINE_IDS),
+    mcp: sanitizeMcpSettings(r.mcp),
   };
 }

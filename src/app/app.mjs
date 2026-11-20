@@ -33,6 +33,7 @@ import { AndroidService } from '../android/service.mjs';
 import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
 import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
 import { Assistant, buildStatus, stateText } from '../assistant/assistant.mjs';
+import { MCP_PRESETS, MCP_ENGINES } from '../mcp/mcp.mjs';
 import { logger } from '../util/log.mjs';
 
 const log = logger('app');
@@ -299,11 +300,17 @@ export class SleepPilotApp extends EventEmitter {
       }
     }
     const merged = { ...this.settings, ...patch, providers: patch.providers ?? this.settings.providers };
+    const mcpBefore = JSON.stringify(this.settings?.mcp || {});
     this.settings = sanitizeGlobalSettings(merged);
+    const mcpChanged = mcpBefore !== JSON.stringify(this.settings.mcp);
     this.toolsCache = null;
     await this.store.saveSettings(this.settings);
     this.manager.applySettings(this.settings);
     configureAndroid(this.settings.android);
+    // OpenCode reads its MCP servers at start: restart it when they change and nothing is running.
+    if (mcpChanged && this.manager.get('opencode')?.connected && !this.activeControllers().length) {
+      this.manager.connect('opencode', { force: true }).catch((err) => log.warn(`OpenCode restart for MCP failed: ${err.message}`));
+    }
     this.emit('broadcast', { type: 'engines', data: this.enginesView() });
     return this.settings;
   }
@@ -472,6 +479,17 @@ export class SleepPilotApp extends EventEmitter {
     const plan = effectivePreview(config, await detectPreview(project.dir));
     if (plan.mode !== 'static') return;
     await this.previews.start(project, plan).catch((err) => log.info(`preview not started: ${err.message}`));
+  }
+
+  // ------------------------------------------------------------------ MCP servers
+
+  mcpView() {
+    return { servers: this.settings.mcp?.servers || [], presets: MCP_PRESETS, envSet: this.credentials.envNames().concat(Object.keys(process.env)).filter((n, i, a) => a.indexOf(n) === i && (this.settings.mcp?.servers || []).some((s) => s.env.includes(n))), engines: MCP_ENGINES };
+  }
+
+  async saveMcp({ servers } = {}) {
+    await this.saveSettings({ mcp: { servers: Array.isArray(servers) ? servers : [] } });
+    return this.mcpView();
   }
 
   // ------------------------------------------------------------------ assistant (chat box)
