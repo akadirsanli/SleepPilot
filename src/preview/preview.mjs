@@ -259,6 +259,10 @@ export class StaticPreview extends EventEmitter {
     this.requests = 0;
     this.changes = 0;
     this.lastChange = null;
+    // Last known size + modification time per file. A watcher event that does not change them
+    // (Windows reports plain reads when last-access times are on) must not reload the page —
+    // otherwise serving the page would trigger a reload, which serves it again, endlessly.
+    this.signatures = new Map();
     this.startedAt = null;
   }
 
@@ -365,6 +369,7 @@ export class StaticPreview extends EventEmitter {
       full = found;
       st = await fsp.stat(full);
     }
+    if (st?.isFile()) this.signatures.set(full, fileSignature(st));
     if (!st?.isFile()) {
       res.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(injectClient(`<!doctype html><meta charset="utf-8"><title>Not found</title><body style="font-family:system-ui;padding:24px;color:#333"><h3>Not found</h3><p><code>${escapeHtml(url.pathname)}</code> does not exist in the previewed folder yet. This page reloads when the file appears.</p></body>`));
       return;
@@ -416,6 +421,20 @@ export class StaticPreview extends EventEmitter {
     return injectClient(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Preview — ${escapeHtml(rel || 'project')}</title><style>body{font-family:system-ui,sans-serif;padding:24px;color:#223;background:#f6f7fb}a{color:#1a56c4;text-decoration:none}li{padding:3px 0}code{background:#e8eaf2;padding:1px 5px;border-radius:4px}</style></head><body><h3>No index.html here yet</h3><p>Folder: <code>/${escapeHtml(rel)}</code>. This page reloads by itself when files change.</p><ul>${rel ? '<li><a href="../">../</a></li>' : ''}${rows || '<li>(empty)</li>'}</ul></body></html>`);
   }
 
+  /** A raw watcher event: only a real content change (size or modification time) counts. */
+  async onWatchEvent(filename) {
+    const rel = String(filename || '');
+    if (!rel) return this.notifyChange('');
+    const full = path.resolve(this.base, rel);
+    if (full !== this.base && !full.startsWith(this.base + path.sep)) return;
+    const st = await fsp.stat(full).catch(() => null);
+    if (st?.isDirectory()) return; // the files inside report their own events
+    const signature = st ? fileSignature(st) : 'deleted';
+    if (this.signatures.get(full) === signature) return;
+    this.signatures.set(full, signature);
+    this.notifyChange(rel);
+  }
+
   notifyChange(file) {
     const rel = String(file || '').split(path.sep).join('/');
     const parts = rel.split('/');
@@ -437,7 +456,9 @@ export class StaticPreview extends EventEmitter {
 
   watch() {
     try {
-      this.watcher = fs.watch(this.base, { recursive: true }, (_event, filename) => this.notifyChange(filename || ''));
+      this.watcher = fs.watch(this.base, { recursive: true }, (_event, filename) => {
+        this.onWatchEvent(filename || '').catch(() => {});
+      });
       this.watcher.on('error', () => this.pollFallback());
     } catch {
       this.pollFallback();
@@ -501,6 +522,8 @@ export class StaticPreview extends EventEmitter {
     }
   }
 }
+
+const fileSignature = (st) => `${st.size}:${Math.round(st.mtimeMs)}`;
 
 const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g, '');
 

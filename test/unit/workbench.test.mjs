@@ -137,15 +137,27 @@ test('preview: static server serves the project read-only with live reload and e
     assert.match(r.body, /client\.js/, 'the 404 page reloads itself when the file appears');
     assert.match((await get(`${base}/__sleeppilot/client.js`)).body, /sleeppilot-preview/);
 
-    // Live reload: a connected page gets a change event.
+    // Serving files is not a change: on Windows the watcher can report plain reads, and a page
+    // that reloaded on its own requests would reload forever.
+    await new Promise((r2) => setTimeout(r2, 700));
+    for (const f of ['/', '/app.js', '/audio/track.ogg']) await get(`${base}${f}`);
+    await new Promise((r2) => setTimeout(r2, 700));
+    assert.equal(p.view().changes, 0, JSON.stringify(p.view().lastChange));
+
+    // Live reload: a real edit reaches a connected page.
     const events = [];
     const sse = http.get(`${base}/__sleeppilot/live`, (res) => res.on('data', (c) => events.push(String(c))));
     await new Promise((r2) => setTimeout(r2, 150));
-    p.notifyChange('style.css');
-    await new Promise((r2) => setTimeout(r2, 500));
+    fs.writeFileSync(path.join(dir, 'app.js'), 'console.log(2)');
+    for (let i = 0; i < 40 && !events.join('').includes('"type":"change"'); i++) await new Promise((r2) => setTimeout(r2, 100));
     sse.destroy();
-    assert.ok(events.join('').includes('"file":"style.css"'), events.join(''));
-    assert.equal(p.view().changes, 1);
+    assert.match(events.join(''), /"type":"change","file":"(app\.js)?"/, events.join(''));
+    assert.ok(p.view().changes >= 1);
+    // Merged events from several files become one full reload ("file": "").
+    p.notifyChange('a.css');
+    p.notifyChange('b.js');
+    await new Promise((r2) => setTimeout(r2, 400));
+    assert.equal(p.view().lastChange.file, null);
   } finally {
     await p.stop();
   }
