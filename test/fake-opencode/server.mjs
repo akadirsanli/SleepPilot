@@ -125,7 +125,15 @@ function managerReply(text, session) {
   return '```json\n{}\n```';
 }
 
-function reviewerReply() {
+function reviewerReply(text = '') {
+  // SLEEPPILOT_FAKE_REVIEW_SCREENSHOTS=1: the reviewer asks to see the page once, then judges it.
+  if (process.env.SLEEPPILOT_FAKE_REVIEW_SCREENSHOTS === '1' && /SCREENSHOTS \(only if you need them\)/.test(text)) {
+    return '```json\n{"verdict": "cannot_judge", "issues": [], "missing_verification": [], "summary": "fake reviewer: need to see it", "screenshots": [{"page": "index.html", "device": "phone"}, {"page": "../outside.html"}]}\n```';
+  }
+  if (/SleepPilot took the screenshots you asked for/.test(text)) {
+    const shot = (text.match(/- (\.sleeppilot\/screens\/\S+\.png)/) || [])[1] || 'none';
+    return `\`\`\`json\n{"verdict": "pass", "issues": [], "missing_verification": [], "summary": "fake reviewer: looked at ${shot}"}\n\`\`\``;
+  }
   return '```json\n{"verdict": "pass", "issues": [], "missing_verification": [], "summary": "fake reviewer: looks fine"}\n```';
 }
 
@@ -270,9 +278,9 @@ async function execute(session) {
       if (/SleepPilot model check/.test(text)) reply = 'OK';
       else if (/FACTS MEASURED BY SLEEPPILOT/.test(text)) reply = `FAKE closing report (test double).\n${(text.match(/Net change since the run started: [^\n]*/) || [''])[0]}`;
       else if (/You are the MANAGER/.test(text) || /could not be parsed/.test(text)) reply = managerReply(text, session);
-      else if (/You are the REVIEWER/.test(text)) {
+      else if (/You are the REVIEWER/.test(text) || /SleepPilot took the screenshots you asked for/.test(text)) {
         if (REVIEW_MS && (!REVIEW_MATCH || REVIEW_MATCH.test(text))) await sleep(REVIEW_MS);
-        reply = reviewerReply();
+        reply = reviewerReply(text);
       }
       else reply = await runDeveloper(session, text, ctx);
     } catch (err) {

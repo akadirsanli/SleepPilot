@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-export const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', '.nuxt', '.turbo', '.parcel-cache', '.cache', '.idea', '.vs', '.gradle', '.tox', 'coverage', 'htmlcov', 'target', '.cargo', '_target', '_recon']);
+export const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', '.nuxt', '.turbo', '.parcel-cache', '.cache', '.idea', '.vs', '.gradle', '.tox', 'coverage', 'htmlcov', 'target', '.cargo', '_target', '_recon', '.sleeppilot']);
 const MAX_FILES = 20_000;
 const HASH_LIMIT = 4 * 1024 * 1024;
 // Source files of real projects can be large (Mount & Blade module_scripts.py is several MB), and

@@ -7,6 +7,11 @@ import { isGeneratedPath } from '../project/generated.mjs';
 import { gitInfo } from '../project/git.mjs';
 import { createBackup } from '../project/backup.mjs';
 import { runChecks, verificationFrom } from '../checks/runner.mjs';
+import { captureScreenshots } from '../checks/html-smoke.mjs';
+import { findBrowsers } from '../checks/browser.mjs';
+import { detectPreview } from '../preview/preview.mjs';
+import fsp from 'node:fs/promises';
+import nodePath from 'node:path';
 import { reconcileTurn } from '../opencode/adapter.mjs';
 import { classifyError } from '../opencode/errors.mjs';
 import { newMessageId, sha1 } from '../util/ids.mjs';
@@ -1137,6 +1142,44 @@ export class RunController extends EventEmitter {
   }
 
   /** Options every role prompt receives: scope discipline, sleep mode, report language. */
+  /** HTML pages the reviewer may ask to see; empty when no browser is installed (no offer then). */
+  async screenshotPages() {
+    if (this.run.screenshotsUnavailable) return [];
+    if (!findBrowsers().length) {
+      this.run.screenshotsUnavailable = true;
+      return [];
+    }
+    const d = await detectPreview(this.project.dir).catch(() => null);
+    return (d?.htmlFiles || []).slice(0, 20);
+  }
+
+  /**
+   * Take the screenshots the reviewer asked for. They are written to .sleeppilot/screens/ inside
+   * the project (so read-only agents can open them with their file tool); that folder is ignored
+   * by SleepPilot's change tracking and carries its own .gitignore.
+   */
+  async takeReviewScreenshots(wanted, n, task) {
+    const pages = new Set((await this.screenshotPages()).map((p) => p.toLowerCase()));
+    const shots = wanted
+      .slice(0, 3)
+      .map((w) => (typeof w === 'string' ? { page: w } : w || {}))
+      .map((w) => ({ page: String(w.page || '').replace(/\\/g, '/').replace(/^\/+/, ''), device: ['phone', 'tablet', 'desktop'].includes(w.device) ? w.device : 'desktop' }))
+      .filter((w) => w.page && !w.page.includes('..') && pages.has(w.page.split(/[?#]/)[0].toLowerCase()));
+    if (!shots.length) {
+      this.addLog({ kind: 'review', role: 'reviewer', text: 'The reviewer asked for screenshots of pages that do not exist; none taken.' });
+      return null;
+    }
+    const base = nodePath.join(this.project.dir, '.sleeppilot');
+    const outDir = nodePath.join(base, 'screens');
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(nodePath.join(base, '.gitignore'), '# SleepPilot working files (reviewer screenshots). Not part of the project.\n*\n').catch(() => {});
+    this.setActivity('reviewer', `#${n} · taking ${shots.length} screenshot(s) for the reviewer…`, { taskId: task.id, iteration: n });
+    const r = await captureScreenshots({ projectDir: this.project.dir, shots, outDir, prefix: `i${n}-${task.id}`.replace(/[^\w.-]/g, '_') }).catch((err) => ({ files: [], missing: shots.map((s) => ({ page: s.page, error: err.message })) }));
+    const files = (r.files || []).map((f) => ({ ...f, path: nodePath.relative(this.project.dir, f.file).split(nodePath.sep).join('/') }));
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Screenshots for the reviewer: ${files.map((f) => `${f.page} (${f.device})`).join(', ') || 'none'}${r.missing?.length ? ` — not captured: ${r.missing.map((m) => m.page).join(', ')}` : ''}` });
+    return files.length || r.missing?.length ? { files, missing: r.missing || [] } : null;
+  }
+
   promptOpts() {
     const l = this.run.limits;
     return { scope: l.scopeMode || 'strict', unattended: !!l.unattended, language: l.language || 'en', protectedPaths: l.protectedPaths || [], parallel: l.parallelDevelopers || 1, scout: this.run.scout || null };
@@ -1926,8 +1969,19 @@ export class RunController extends EventEmitter {
       this.setActivity('reviewer', `#${n} · the reviewer is assessing…`, { taskId: task.id, iteration: n });
       try {
         const sid = this.waveCheckCache ? await this.reviewSessionFor(task) : await this.ensureSession('reviewer');
-        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: this.promptOpts() }), { iterationN: n, task, taskType: 'review' });
-        const j = extractJson(rt.finalText || rt.allText);
+        const screenshotPages = await this.screenshotPages();
+        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: { ...this.promptOpts(), screenshotPages } }), { iterationN: n, task, taskType: 'review' });
+        let j = extractJson(rt.finalText || rt.allText);
+        // Screenshots only when the reviewer asks for them, at most 3, and one extra turn.
+        const wanted = screenshotPages.length && Array.isArray(j?.screenshots) ? j.screenshots : [];
+        if (wanted.length) {
+          const shots = await this.takeReviewScreenshots(wanted, n, task);
+          if (shots) {
+            iteration.screenshots = shots.files.map((f) => ({ page: f.page, device: f.device, path: f.path }));
+            const rt2 = await this.roleTurn('reviewer', sid, P.reviewScreenshotsPrompt(shots), { iterationN: n, task, taskType: 'review' });
+            j = extractJson(rt2.finalText || rt2.allText) || j;
+          }
+        }
         iteration.review = j
           ? { verdict: String(j.verdict || 'cannot_judge').split(/[\s|]/)[0], issues: (j.issues || []).map(String).slice(0, 12), missingVerification: (j.missing_verification || []).map(String).slice(0, 12), summary: String(j.summary || '').slice(0, 2000), sameModelAsDeveloper: sameModel(run.limits.models) }
           : { verdict: 'cannot_judge', issues: [], missingVerification: [], summary: 'Could not parse the reviewer reply.', sameModelAsDeveloper: sameModel(run.limits.models) };

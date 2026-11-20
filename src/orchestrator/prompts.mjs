@@ -270,10 +270,25 @@ CHECK RESULTS (executed by SleepPilot):
 ${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}`).join('\n') || '- none ran'}
 
 Judge whether the change satisfies the acceptance criteria, what is missing, and what evidence is missing.
+${opts.screenshotPages?.length ? `
+SCREENSHOTS (only if you need them): if you cannot judge the result without SEEING it (layout, visual design, a canvas or game screen, mobile view), add "screenshots": [{"page": "index.html", "device": "desktop | phone | tablet"}] (at most 3) to your JSON and use verdict "cannot_judge" for now. SleepPilot opens the pages in a real browser, saves the images and asks you once more. Do not ask when the diff and the checks are enough. Pages in the project: ${opts.screenshotPages.slice(0, 15).join(', ')}.
+` : ''}
 ${opts.scope === 'creative' ? 'Scope mode is CREATIVE: related extra improvements are allowed; still flag anything that breaks requested behaviour.' : 'Scope mode is STRICT: list every change that is not needed for this task or the objective as an issue starting with "OUT-OF-SCOPE:", and use verdict "incomplete" if such changes are significant.'}
 Reply with ONLY a JSON object in a \`\`\`json fenced block:
 \`\`\`json
 {"verdict": "pass | fail | incomplete | cannot_judge", "issues": ["concrete defect or gap"], "missing_verification": ["what was not actually tested"], "summary": "..."}
+\`\`\``;
+}
+
+/** Second reviewer turn after SleepPilot took the screenshots the reviewer asked for. */
+export function reviewScreenshotsPrompt({ files = [], missing = [] }) {
+  return `SleepPilot took the screenshots you asked for (real browser, after the page settled):
+${files.map((f) => `- ${f.path} — ${f.page} (${f.device})${f.problems?.length ? ` · page errors while loading: ${f.problems.map((p) => p.text).join('; ').slice(0, 300)}` : ''}`).join('\n') || '- none could be taken'}
+${missing.length ? `Not captured: ${missing.map((m) => `${m.page} (${m.error})`).join('; ')}\n` : ''}
+Open each image with your file-reading tool and look at it. Then give your FINAL verdict for the same task, judged on the diff, the checks AND what the screenshots show. Do not ask for more screenshots.
+Reply with ONLY a JSON object in a \`\`\`json fenced block:
+\`\`\`json
+{"verdict": "pass | fail | incomplete | cannot_judge", "issues": ["concrete defect or gap, mention what the screenshot shows"], "missing_verification": ["..."], "summary": "..."}
 \`\`\``;
 }
 
