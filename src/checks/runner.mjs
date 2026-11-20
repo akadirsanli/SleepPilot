@@ -7,6 +7,8 @@ import { checkCitations } from './citations.mjs';
 import { runCargo, detectCargo } from '../reverse/rust.mjs';
 import { cachedAndroidToolchain } from '../android/toolchain.mjs';
 import { buildAndroid } from '../android/build.mjs';
+import { runAndroidApp } from '../android/run.mjs';
+import { detectAndroidProject, findArtifacts, inspectArtifact } from '../android/project.mjs';
 
 const tail = (s, n = 4000) => (s && s.length > n ? '…' + s.slice(-n) : s || '');
 
@@ -183,6 +185,8 @@ export async function runChecks({ projectDir, checks, changedFiles = [], command
         const result = await runAndroidBuildCheck({ check, projectDir, base, started });
         results.push(result);
         settle?.(result);
+      } else if (check.type === 'android-run') {
+        results.push(await runAndroidRunCheck({ check, projectDir, base, started }));
       } else {
         results.push({ ...base, status: 'skipped', output: `Unknown check type: ${check.type}`, durationMs: 0 });
       }
@@ -218,6 +222,32 @@ async function runAndroidBuildCheck({ check, projectDir, base, started }) {
   } catch (err) {
     return { ...base, status: 'error', durationMs: Date.now() - started, output: `The Android build could not start: ${redact(err.message)}` };
   }
+}
+
+/**
+ * Start the newest debug APK on a device or emulator and look for a crash (see android/run.mjs).
+ * A missing device, emulator or toolchain is an environment error, not a failed task.
+ */
+async function runAndroidRunCheck({ check, projectDir, base, started }) {
+  const toolchain = await cachedAndroidToolchain();
+  const info = await detectAndroidProject(projectDir);
+  const module = check.module ?? info.appModule?.name ?? '';
+  const moduleDir = info.gradleRoot ? path.join(info.gradleRoot, ...(module ? module.split(':') : [])) : projectDir;
+  const apks = (await findArtifacts(moduleDir)).filter((a) => a.kind === 'apk' && a.variant !== 'release' && !a.unsigned);
+  if (!apks.length) return { ...base, status: 'error', durationMs: Date.now() - started, output: 'No debug APK was found to start. Put the "Android build" check before this one.' };
+  const details = await inspectArtifact(apks[0].file).catch(() => null);
+  const shot = path.join(projectDir, '.sleeppilot', 'screens', `android-${Date.now().toString(36)}.png`);
+  const r = await runAndroidApp({ toolchain, apk: apks[0].file, packageName: details?.manifest?.package || info.appModule?.applicationId, serial: check.device || null, avd: check.avd || null, settleSec: check.settleSec || 8, screenshotFile: shot, startEmulatorIfNeeded: check.startEmulator !== false });
+  if (r.screenshot) await fs.promises.writeFile(path.join(projectDir, '.sleeppilot', '.gitignore'), '# SleepPilot working files. Not part of the project.\n*\n').catch(() => {});
+  const rel = r.screenshot ? path.relative(projectDir, r.screenshot).split(path.sep).join('/') : null;
+  return {
+    ...base,
+    command: `adb install + start ${r.package || ''}`.trim(),
+    status: r.status,
+    durationMs: Date.now() - started,
+    output: tail(`${r.summary}${r.crash ? `\n\nCrash from the device log:\n${r.crash}` : ''}${rel ? `\nScreenshot of the device: ${rel}` : ''}`, 8000),
+    details: { device: r.device || null, package: r.package || null, apk: path.relative(projectDir, apks[0].file).split(path.sep).join('/'), screenshot: rel, crashed: !!r.crash },
+  };
 }
 
 /** Summarise check results into one verification verdict for a task. */

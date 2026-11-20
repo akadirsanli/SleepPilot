@@ -288,6 +288,7 @@ function appCardHtml(a) {
       <div>Gradle project</div><div class="mono">${esc(info.gradleRootRel === '.' ? '(project folder)' : info.gradleRootRel)}${info.agp ? ` <span class="hint">AGP ${esc(info.agp)}</span>` : ''}</div>
       <div>Gradle wrapper</div><div>${info.wrapper?.complete ? `${badge('OK', 'badge-ok')} ${esc(info.wrapper.version || '')}` : badge(info.wrapper?.properties ? 'incomplete' : 'none', 'badge-warn')} <button class="btn btn-small" data-act="androidWrapper">${info.wrapper?.complete ? 'Repair' : 'Add wrapper'}</button></div>
       <div>Build check</div><div>${hasCheck ? `${badge('on', 'badge-ok')} <span class="hint">every task must keep the app building</span>` : `${badge('off', 'badge-muted')} <button class="btn btn-small" data-act="androidAddCheck">Verify every task with an Android build</button>`}</div>
+      <div>Run check</div><div>${(S.project.checks || []).some((c) => c.type === 'android-run' && c.enabled) ? `${badge('on', 'badge-ok')} <span class="hint">after each build the app is started on a phone/emulator and must not crash</span>` : `${badge('off', 'badge-muted')} <button class="btn btn-small" data-act="androidAddRunCheck" title="Needs a USB phone with USB debugging, or an emulator image (Android Studio → Device Manager). An emulator is started without a window when no device is connected.">Also start the app after each build</button>`}</div>
     </div>
     ${(info.notes || []).map((n) => `<div class="hint" style="margin-top:6px">• ${esc(n)}</div>`).join('')}
   </div>`;
@@ -548,6 +549,12 @@ export const WB_ACTIONS = {
     const r = await api('POST', `/api/projects/${S.projectId}/android/wrapper`, {});
     toast(`Gradle wrapper ${r.version} added.`);
     await loadAndroid();
+    renderAndroidView();
+  },
+  androidAddRunCheck: async () => {
+    await api('POST', `/api/projects/${S.projectId}/android/check`, { run: true });
+    S.project = (await api('GET', `/api/projects/${S.projectId}`)).project;
+    toast('Android run check added: after each build the app is started on a device and must not crash.');
     renderAndroidView();
   },
   androidAddCheck: async () => {

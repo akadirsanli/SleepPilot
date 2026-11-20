@@ -124,7 +124,7 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
   route('POST', '/api/projects/:id/android/install', async (p, b) => app.androidInstall(p.id, b || {}));
   route('POST', '/api/projects/:id/android/logcat', async (p, b) => app.androidDeviceErrors(p.id, b || {}));
   route('POST', '/api/projects/:id/android/wrapper', async (p) => app.androidAddWrapper(p.id));
-  route('POST', '/api/projects/:id/android/check', async (p) => app.androidAddCheck(p.id));
+  route('POST', '/api/projects/:id/android/check', async (p, b) => app.androidAddCheck(p.id, b || {}));
   route('GET', '/api/projects/:id/android/file', async (p, _, q) => app.androidArtifactFile(p.id, q.get('path')));
 
   const handle = async (req, res, ctx) => {

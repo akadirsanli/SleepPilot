@@ -31,6 +31,7 @@ import { initWorkspace, newProjectDir, projectFolderName, validateWorkspaceDir, 
 import { PreviewManager, detectPreview, effectivePreview, sanitizePreviewConfig } from '../preview/preview.mjs';
 import { AndroidService } from '../android/service.mjs';
 import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
+import { stopStartedEmulators } from '../android/run.mjs';
 import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
 import { Assistant, buildStatus, stateText } from '../assistant/assistant.mjs';
 import { MCP_PRESETS, MCP_ENGINES } from '../mcp/mcp.mjs';
@@ -593,17 +594,25 @@ export class SleepPilotApp extends EventEmitter {
     return this.android.startGradleDownload(opts);
   }
 
-  /** The "Android build" check for a project that does not have one yet. */
-  async androidAddCheck(projectId) {
+  /**
+   * The "Android build" check for a project that does not have one yet; with { run: true } also
+   * the "Android run" check (start the app on a device/emulator after each build).
+   */
+  async androidAddCheck(projectId, { run = false } = {}) {
     const project = await this.requireProject(projectId);
     const info = await this.android.project(project);
     if (!info.info.appModule) throw new Error('No Android application module was found in this project.');
-    if (!(project.checks || []).some((c) => c.type === 'android-build')) {
-      const module = info.info.appModule.name;
-      project.checks = sanitizeChecks([...(project.checks || []), { id: 'android-build', type: 'android-build', name: `Android build (${module ? `:${module}:` : ''}assembleDebug)`, module, variant: 'debug', enabled: true, approved: true, timeoutSec: 2400 }]);
-      if (!project.kind || project.kind === 'code') project.kind = 'android';
-      await this.store.saveProject(project);
+    const module = info.info.appModule.name;
+    let list = [...(project.checks || [])];
+    if (!list.some((c) => c.type === 'android-build')) list.push({ id: 'android-build', type: 'android-build', name: `Android build (${module ? `:${module}:` : ''}assembleDebug)`, module, variant: 'debug', enabled: true, approved: true, timeoutSec: 2400 });
+    if (run && !list.some((c) => c.type === 'android-run')) {
+      // After the build check: it starts the APK that check produced.
+      const at = list.findIndex((c) => c.type === 'android-build');
+      list.splice(at + 1, 0, { id: 'android-run', type: 'android-run', name: 'Android run (start the app on a device, no crash)', module, enabled: true, approved: true, settleSec: 8, timeoutSec: 900 });
     }
+    project.checks = sanitizeChecks(list);
+    if (!project.kind || project.kind === 'code') project.kind = 'android';
+    await this.store.saveProject(project);
     return project.checks;
   }
 
@@ -1012,6 +1021,7 @@ export class SleepPilotApp extends EventEmitter {
     this.keepAwake.set(false);
     await this.previews.stopAll().catch(() => {});
     await this.android.cancelAll().catch(() => {});
+    stopStartedEmulators();
     for (const t of this.recoveryTimers || []) clearTimeout(t);
     // A clean shutdown is the user's decision: the next start must not continue the run by itself.
     for (const c of this.controllers.values()) {
@@ -1118,14 +1128,18 @@ function decorateScout(scout, { scope = null, allTools = null, kind = scout.kind
 export function sanitizeChecks(list) {
   return (Array.isArray(list) ? list : []).slice(0, 30).map((c, i) => ({
     id: String(c.id || `custom-${i + 1}`).slice(0, 60),
-    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build'].includes(c.type) ? c.type : 'command',
+    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build', 'android-run'].includes(c.type) ? c.type : 'command',
     name: String(c.name || c.command || c.cargo || 'Check').slice(0, 120),
     command: c.type === 'command' || !c.type ? String(c.command || '').slice(0, 1000) : undefined,
     cargo: c.type === 'cargo' ? ['check', 'test', 'build', 'clippy', 'fmt'].includes(String(c.cargo || '').split(/\s+/)[0]) ? String(c.cargo).slice(0, 100) : 'check' : undefined,
     entries: Array.isArray(c.entries) ? c.entries.map(String).slice(0, 10) : undefined,
     minBytes: c.type === 'doc-check' ? num(c.minBytes, { min: 0, max: 10_000_000, allowNull: false }) ?? 300 : undefined,
     interpreter: c.type === 'py-syntax' && c.interpreter ? String(c.interpreter).slice(0, 400) : undefined,
-    module: c.type === 'android-build' && c.module != null ? String(c.module).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    module: (c.type === 'android-build' || c.type === 'android-run') && c.module != null ? String(c.module).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    device: c.type === 'android-run' && c.device ? String(c.device).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    avd: c.type === 'android-run' && c.avd ? String(c.avd).replace(/[^\w.-]/g, '').slice(0, 80) : undefined,
+    settleSec: c.type === 'android-run' ? num(c.settleSec, { min: 2, max: 120, allowNull: false }) ?? 8 : undefined,
+    startEmulator: c.type === 'android-run' ? c.startEmulator !== false : undefined,
     variant: c.type === 'android-build' ? (c.variant === 'release' ? 'release' : 'debug') : undefined,
     enabled: !!c.enabled,
     approved: c.type === 'command' || !c.type ? !!c.approved : true,

@@ -267,7 +267,7 @@ DIFF (may be truncated):
 ${patchText || '(no diff available)'}
 
 CHECK RESULTS (executed by SleepPilot):
-${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}`).join('\n') || '- none ran'}
+${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}${c.details?.screenshot ? ` (screenshot of the running app: ${c.details.screenshot} — open it with your file tool if the look matters)` : ''}`).join('\n') || '- none ran'}
 
 Judge whether the change satisfies the acceptance criteria, what is missing, and what evidence is missing.
 ${opts.screenshotPages?.length ? `
