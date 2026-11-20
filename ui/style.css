@@ -369,3 +369,16 @@ body.on-phone .preview-stage { display: none; }
   .preview-stage { padding: 8px; }
   .preview-device { border-width: 6px; border-radius: 14px; }
 }
+
+/* ---------------------------------------------------------------- chat: folded tool calls */
+.chat-tools { margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: rgba(10, 16, 32, .35); }
+.chat-tools > summary { cursor: pointer; font-size: 12.5px; padding: 4px 0; list-style: none; }
+.chat-tools > summary::-webkit-details-marker { display: none; }
+.chat-tools > summary::before { content: '▸ '; color: var(--muted); }
+.chat-tools[open] > summary::before { content: '▾ '; }
+.chat-tools.bad { border-color: rgba(255, 114, 133, .35); }
+.chat-tools-body { padding: 0 0 4px 10px; border-left: 1px solid var(--line); margin-left: 4px; }
+.tool-bad { color: var(--bad); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

@@ -1,4 +1,5 @@
 // SleepPilot UI — vanilla JS, no build step.
+import { morph } from './dom.js';
 import { initChat, CHAT, chatReset, chatLoad, chatApply, chatTurnFinished, chatSchedule, chatRender, chatPanelHtml } from './chat.js';
 import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange } from './workbench.js';
 
@@ -1133,7 +1134,7 @@ function runBodyHtml(r) {
 function taskListHtml(r) {
   if (!r.tasks?.length) return '<div class="empty">The Manager has not written a task list yet.</div>';
   return `<div class="task-list">${r.tasks.map((t) => `
-    <div class="task ${esc(t.status)}">
+    <div class="task ${esc(t.status)}" data-key="task-${esc(t.id)}">
       <div class="task-head">
         <span class="badge badge-muted">${esc(t.id)}</span>
         <span class="task-title">${esc(t.title)}</span>
@@ -1179,25 +1180,16 @@ function detailsHtml(r) {
   ${r.settingChanges?.length ? `<h3>Changed during the run</h3>${r.settingChanges.map((c) => `<div class="hint">after iteration ${c.afterIteration}: ${esc(c.changes.join('; '))}</div>`).join('')}` : ''}`;
 }
 
+// Live updates change only what differs (see ui/dom.js): rebuilding these blocks with innerHTML
+// several times a second replayed every entrance animation — the "flash" on the Run screen.
 function updateRunView(r) {
-  const head = $('#runHead');
-  if (head) head.innerHTML = runHeadHtml(r);
-  const controls = $('#runControls');
-  if (controls) controls.innerHTML = runControlsHtml(r);
-  const pending = $('#runPending');
-  if (pending) pending.innerHTML = pendingHtml(r);
-  const other = $('#otherRuns');
-  if (other) other.innerHTML = otherActiveRunsHtml(r);
-  const activity = $('#runActivity');
-  if (activity) activity.innerHTML = `${r.state === 'running' ? '<span class="live-indicator"><span class="spinner"></span> live</span> ' : ''}${esc(r.activity?.message || '')}`;
-  if (S.runTab === 'tasks') {
-    const list = $('#taskList');
-    if (list) list.innerHTML = taskListHtml(r);
-  }
-  if (S.runTab === 'details') {
-    const body = $('#runBody');
-    if (body) body.innerHTML = detailsHtml(r);
-  }
+  morph($('#runHead'), runHeadHtml(r));
+  morph($('#runControls'), runControlsHtml(r));
+  morph($('#runPending'), pendingHtml(r));
+  morph($('#otherRuns'), otherActiveRunsHtml(r));
+  morph($('#runActivity'), `${r.state === 'running' ? '<span class="live-indicator"><span class="spinner"></span> live</span> ' : ''}${esc(r.activity?.message || '')}`);
+  if (S.runTab === 'tasks') morph($('#taskList'), taskListHtml(r));
+  if (S.runTab === 'details') morph($('#runBody'), detailsHtml(r));
   renderRunBadge(r);
 }
 
@@ -2632,7 +2624,7 @@ window.addEventListener('message', onPreviewMessage);
   setInterval(() => {
     if (S.view === 'run' && S.run && !['completed', 'stopped', 'failed'].includes(S.run.state)) {
       const head = $('#runHead');
-      if (head && !isEditing()) head.innerHTML = runHeadHtml(S.run);
+      if (head && !isEditing()) morph(head, runHeadHtml(S.run));
     }
   }, 1000);
 })().catch((err) => {
