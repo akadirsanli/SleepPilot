@@ -1,5 +1,6 @@
 // SleepPilot UI — vanilla JS, no build step.
 import { initChat, CHAT, chatReset, chatLoad, chatApply, chatTurnFinished, chatSchedule, chatRender, chatPanelHtml } from './chat.js';
+import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange } from './workbench.js';
 
 const S = {
   state: null,
@@ -276,6 +277,17 @@ function connectEvents() {
       renderEngineBadge();
       if (S.view === 'settings' && !isEditing()) renderSettings();
       if (S.view === 'home') renderEngineStrip();
+    } else if (msg.type === 'preview') {
+      if (S.state) S.state.previews = [...(S.state.previews || []).filter((x) => x.projectId !== msg.data.projectId), ...(msg.data.view?.running ? [{ projectId: msg.data.projectId, url: msg.data.view.url, mode: msg.data.view.mode, state: msg.data.view.state }] : [])];
+      onPreviewEvent(msg.data);
+      if (S.view === 'run' && msg.data.projectId === S.projectId && !msg.data.change) {
+        const c = $('#runControls');
+        if (c && S.run) c.innerHTML = runControlsHtml(S.run);
+      }
+    } else if (msg.type === 'android-build') {
+      onAndroidBuildEvent(msg.data);
+    } else if (msg.type === 'android-toolchain') {
+      onAndroidToolchainEvent(msg.data);
     } else if (msg.type === 'run') {
       onRunUpdate(msg.data);
     } else if (msg.type === 'turn') {
@@ -363,7 +375,7 @@ async function go(view) {
   localStorage.setItem('sp.view', view);
   setActiveNav(view);
   await guarded(async () => {
-    if (['project', 'run', 'report'].includes(view)) {
+    if (['project', 'run', 'report', 'preview', 'android'].includes(view)) {
       if (S.projectId) await loadProject(S.projectId, { keepRun: true });
       else {
         renderNeedProject();
@@ -376,10 +388,12 @@ async function go(view) {
       await loadRun();
     }
     if (view === 'report') await renderReport();
+    if (view === 'preview' && S.projectId) await loadPreview(S.projectId);
+    if (view === 'android' && S.projectId) await loadAndroid(S.projectId);
     if (view === 'insights') S.analytics = await api('GET', '/api/analytics').catch(() => S.analytics);
     if (view === 'reverse') await renderReverse();
     if (view === 'settings') renderSettings().catch((err) => toast(err.message, true));
-    if (view === 'home') await loadState();
+    if (view === 'home') await Promise.all([loadState(), loadWorkspace()]);
     render();
   });
 }
@@ -390,7 +404,7 @@ function setActiveNav(view) {
 
 function render() {
   setActiveNav(S.view);
-  const map = { home: renderHome, project: renderProject, run: renderRun, report: renderReportView, insights: renderInsightsView, reverse: renderReverseView, settings: renderSettingsView };
+  const map = { home: renderHome, project: renderProject, run: renderRun, report: renderReportView, insights: renderInsightsView, reverse: renderReverseView, settings: renderSettingsView, preview: () => (S.project ? renderPreviewView() : renderNeedProject()), android: () => (S.project ? renderAndroidView() : renderNeedProject()) };
   (map[S.view] || renderHome)();
 }
 
@@ -425,13 +439,15 @@ async function renderHome() {
 
   ${activeRuns.length ? `<div class="card"><div class="card-head"><h2>Active runs</h2><span class="hint">${activeRuns.length} of ${S.state.settings?.maxConcurrentRuns || 3} allowed</span></div>${activeRuns.map((ar) => `<div class="project-row"><div class="project-main"><div class="project-name"><span class="pulse-dot"></span>${esc(ar.projectName)} ${badge(ar.state, ar.state === 'running' ? 'badge-ok' : 'badge-warn')}</div><div class="hint">${esc(ar.engine || '')} · ${esc(ar.activity || '')}</div></div><div class="project-meta"><span class="hint">iteration ${num(ar.iteration)}</span><button class="btn btn-small" data-act="openRunById" data-project="${esc(ar.projectId)}" data-run="${esc(ar.runId)}">Open</button></div></div>`).join('')}</div>` : ''}
 
+  ${workspaceCardHtml()}
+
   <div class="grid grid-2">
     <div class="card">
-      <div class="card-head"><h2>New project</h2><span class="hint">Any folder with code, or a new empty folder</span></div>
+      <div class="card-head"><h2>New project</h2><span class="hint">${S.state?.workspace?.configured ? 'A name is enough: the folder is created in the workspace' : 'Any folder with code, or a new empty folder'}</span></div>
       <label>Project name</label>
-      <input type="text" id="npName" placeholder="e.g. My app, save-editor, game mod">
-      <label>Folder</label>
-      <div class="row"><input type="text" id="npDir" class="grow" placeholder="C:\\projects\\my-app"><button class="btn" data-act="pickDir" data-for="npDir">Browse…</button></div>
+      <input type="text" id="npName" placeholder="e.g. My app, racing game, save-editor">
+      <label>Folder ${S.state?.workspace?.configured ? '<span class="hint">(optional)</span>' : ''}</label>
+      <div class="row"><input type="text" id="npDir" class="grow" placeholder="${S.state?.workspace?.configured ? esc(`empty = ${S.state.workspace.dir}${S.state.app?.platform === 'win32' ? '\\' : '/'}projects${S.state.app?.platform === 'win32' ? '\\' : '/'}<name>`) : 'C:\\projects\\my-app'}"><button class="btn" data-act="pickDir" data-for="npDir">Browse…</button></div>
       <div class="grid grid-2">
         <div>
           <label>Engine</label>
@@ -440,13 +456,17 @@ async function renderHome() {
         <div>
           <label>Template</label>
           <select id="npTemplate">
-            <option value="blank" ${S.newTemplate === 'blank' ? 'selected' : ''}>Existing / blank folder</option>
-            <option value="rust" ${S.newTemplate === 'rust' ? 'selected' : ''}>New Rust project (Cargo scaffold)</option>
+            ${(S.state?.templates || [{ id: 'blank', label: 'Existing / blank folder' }, { id: 'rust', label: 'New Rust project (Cargo scaffold)' }]).map((t) => `<option value="${esc(t.id)}" ${S.newTemplate === t.id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
           </select>
         </div>
       </div>
+      <div id="npAndroidRow" ${(S.state?.templates || []).find((t) => t.id === S.newTemplate)?.android ? '' : 'hidden'}>
+        <label>Application id <span class="hint">(optional; the app's unique id on phones and Google Play)</span></label>
+        <input type="text" id="npAppId" placeholder="com.example.mygame — empty = made from the name">
+        <label class="check"><input type="checkbox" id="npWrapper" checked> Add the Gradle wrapper (gradlew) when a Gradle installation is available</label>
+      </div>
       <label class="check"><input type="checkbox" id="npCreate" ${S.newTemplate === 'rust' ? 'checked' : ''}> Create the folder if it does not exist</label>
-      <div class="row" style="margin-top:10px"><button class="btn btn-primary" data-act="createProject">Create project</button><span class="hint">A new Rust project is scaffolded and checked with cargo when possible.</span></div>
+      <div class="row" style="margin-top:10px"><button class="btn btn-primary" data-act="createProject">Create project</button><span class="hint">Templates write a working starting point plus the checks that prove each task (cargo, Android build, page load).</span></div>
     </div>
 
     <div class="card">
@@ -461,7 +481,7 @@ async function renderHome() {
     ${ps.length ? ps.map((p) => `
       <div class="project-row">
         <div class="project-main">
-          <div class="project-name">${esc(p.name)} ${p.kind?.startsWith('reverse') ? badge('Reverse & Rust', 'badge-info') : p.kind === 'rust' ? badge('Rust', 'badge-info') : ''} ${activeRuns.some((ar) => ar.projectId === p.id) ? badge('active run', 'badge-ok') : ''}</div>
+          <div class="project-name">${esc(p.name)} ${p.kind?.startsWith('reverse') ? badge('Reverse & Rust', 'badge-info') : p.kind === 'rust' ? badge('Rust', 'badge-info') : p.kind === 'android' ? badge('Android', 'badge-info') : p.kind === 'web' ? badge('Web', 'badge-info') : ''} ${(S.state?.previews || []).some((x) => x.projectId === p.id) ? badge('preview live', 'badge-ok') : ''} ${activeRuns.some((ar) => ar.projectId === p.id) ? badge('active run', 'badge-ok') : ''}</div>
           <div class="project-dir mono">${esc(p.dir)}</div>
           <div class="hint">${esc((p.objective?.text || 'No objective yet').slice(0, 180))}</div>
         </div>
@@ -1057,6 +1077,8 @@ function runControlsHtml(r) {
     ${!terminal ? `<button class="btn btn-danger" data-act="stopRun" data-now="0">Stop</button><button class="btn btn-danger" data-act="stopRun" data-now="1">Stop now</button>` : ''}
     ${!terminal ? `<button class="btn btn-small" data-act="extendRun">+1 hour</button>` : ''}
     ${terminal ? `<button class="btn btn-primary" data-act="goReport">Report</button>` : ''}
+    ${(S.state?.previews || []).some((x) => x.projectId === S.projectId) ? '<button class="btn btn-small" data-act="goPreview"><span class="pulse-dot"></span>Preview</button>' : ''}
+    ${S.project?.kind === 'android' ? '<button class="btn btn-small" data-act="goAndroid">Android</button>' : ''}
     <button class="btn btn-ghost btn-small" data-act="goProject">Setup</button>`;
 }
 
@@ -1386,7 +1408,7 @@ async function renderSettings() {
 }
 
 function renderSettingsView() {
-  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', phone: 'Phone', app: 'App' };
+  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', workspace: 'Workspace', android: 'Android', phone: 'Phone', app: 'App' };
   main().innerHTML = `
   <h1>Settings</h1>
   <div class="sub">Local configuration. API keys are stored in a separate credentials file and never shown again.</div>
@@ -1394,6 +1416,8 @@ function renderSettingsView() {
   <div id="settingsBody">${settingsBodyHtml()}</div>`;
   setActiveNav('settings');
   if (S.settingsTab === 'phone' && !S.state?.viewer?.phone) loadPhonePanel();
+  if (S.settingsTab === 'workspace' && !WB.workspace) loadWorkspace().then(() => S.view === 'settings' && S.settingsTab === 'workspace' && renderSettingsView()).catch(() => {});
+  if (S.settingsTab === 'android' && !WB.androidTc) loadAndroid(null).then(() => S.view === 'settings' && S.settingsTab === 'android' && renderSettingsView()).catch(() => {});
 }
 
 // ------------------------------------------------------------------ phone access
@@ -1445,6 +1469,8 @@ function settingsBodyHtml() {
   if (S.settingsTab === 'local') return localAiSettingsHtml();
   if (S.settingsTab === 'tools') return toolsSettingsHtml();
   if (S.settingsTab === 'phone') return phoneSettingsHtml();
+  if (S.settingsTab === 'workspace') return workspaceSettingsHtml();
+  if (S.settingsTab === 'android') return androidSettingsHtml();
   if (S.settingsTab === 'app') return appSettingsHtml();
   return enginesSettingsHtml();
 }
@@ -1722,7 +1748,7 @@ function appSettingsHtml() {
   return `<div class="card flat">
     <div class="card-head"><h2>Application</h2></div>
     <div class="kv">
-      <div>Version</div><div>${esc(S.state.app?.version || '2.4.1')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
+      <div>Version</div><div>${esc(S.state.app?.version || '2.5.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
       <div>Data folder</div><div class="mono mono-wrap">${esc(S.state.app?.dataRoot || S.state.appDataRoot || 'per-user application data')}</div>
       <div>Default engine</div><div>${esc(engineById(defaultEngineId())?.label || defaultEngineId())}</div>
       <div>Platform</div><div>${esc(S.state.app?.platform || '')} · ${esc(S.state.app?.arch || '')} · Node ${esc(S.state.app?.node || '')}</div>
@@ -1738,6 +1764,8 @@ function appSettingsHtml() {
 // ------------------------------------------------------------------ ACTIONS
 
 const ACTIONS = {
+  goPreview: () => go('preview'),
+  goAndroid: () => go('android'),
   goHome: () => go('home'),
   goProject: () => go('project'),
   goRun: () => go('run'),
@@ -1770,6 +1798,8 @@ const ACTIONS = {
       createIfMissing: !!$('#npCreate')?.checked,
       engine: $('#npEngine')?.value || defaultEngineId(),
       template: $('#npTemplate')?.value || 'blank',
+      applicationId: $('#npAppId')?.value.trim() || undefined,
+      addWrapper: !!$('#npWrapper')?.checked,
     };
     const p = await api('POST', '/api/projects', body);
     S.newTemplate = 'blank';
@@ -2351,6 +2381,24 @@ const ACTIONS = {
   },
 };
 
+// Workbench actions (workspace, preview, android); a few need app.js navigation.
+Object.assign(ACTIONS, WB_ACTIONS, {
+  wsOpenFolder: async (el) => {
+    const p = await api('POST', '/api/workspace/open', { folder: el.dataset.folder });
+    toast('Project opened.');
+    await loadWorkspace();
+    await openProject(p.id);
+  },
+  wsSettings: () => {
+    S.settingsTab = 'workspace';
+    return go('settings');
+  },
+  androidPaths: () => {
+    S.settingsTab = 'android';
+    return go('settings');
+  },
+});
+
 async function openProject(id, { view = null, runId = null } = {}) {
   if (!id) return;
   try {
@@ -2534,9 +2582,10 @@ document.addEventListener('change', (e) => {
     chatRender();
   }
   if (e.target.id === 'npTemplate') {
-    const create = $('#npCreate');
-    if (create && e.target.value === 'rust') create.checked = true;
+    S.newTemplate = e.target.value;
+    onTemplateChange();
   }
+  if (e.target.name === 'androidDevice') WB.selectedDevice = e.target.value;
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#modal').hidden) $('#modal').hidden = true;
@@ -2549,13 +2598,15 @@ document.addEventListener('keydown', (e) => {
 // ------------------------------------------------------------------ boot
 
 initChat({ S, api, esc, fmtClock, fmtDur, fmtTime, num, markdown, TURN });
+initWorkbench({ S, api, esc, badge, toast, fmtTime, fmtDur, num, openModal, rerender: () => render() });
+window.addEventListener('message', onPreviewMessage);
 
 (async function boot() {
   await loadState();
   if (S.projectId) await loadProject(S.projectId).catch(() => {});
   connectEvents();
   const saved = localStorage.getItem('sp.view');
-  const view = saved && ['home', 'project', 'run', 'report', 'insights', 'reverse', 'settings'].includes(saved) ? saved : S.projectId ? 'project' : 'home';
+  const view = saved && ['home', 'project', 'run', 'report', 'insights', 'reverse', 'settings', 'preview', 'android'].includes(saved) ? saved : S.projectId ? 'project' : 'home';
   await go(view);
   setInterval(() => {
     if (S.view === 'run' && S.run && !['completed', 'stopped', 'failed'].includes(S.run.state)) {

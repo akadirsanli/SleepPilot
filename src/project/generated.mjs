@@ -6,7 +6,7 @@
  */
 const GENERATED_DIRS = new Set(['dist', 'build', 'out', 'target', 'coverage', 'htmlcov', '.next', '.nuxt', '.parcel-cache', '.pytest_cache', '.mypy_cache', '__pycache__', '.tox', 'node_modules', 'bin', 'obj', '.gradle', '.venv', 'venv', '_target', '_recon']);
 const GENERATED_FILES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'pipfile.lock', 'cargo.lock', 'composer.lock']);
-const GENERATED_EXT = /\.(pyc|pyo|class|o|obj|so|dll|exe|map|min\.js|min\.css|toc|pyz|pkg|whl)$/i;
+const GENERATED_EXT = /\.(pyc|pyo|class|o|obj|so|dll|exe|map|min\.js|min\.css|toc|pyz|pkg|whl|apk|aab|aar|dex|jks|keystore)$/i;
 
 export function isGeneratedPath(file) {
   const parts = String(file).replace(/\\/g, '/').split('/');

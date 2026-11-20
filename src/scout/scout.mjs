@@ -135,11 +135,23 @@ export async function scanProject(dir, { inspection = null } = {}) {
     if (manifests.some((f) => /(\.tests?\.csproj|\.spec\.csproj)$/i.test(f)) || has(/(^|\/)tests?\//i)) addCheck('dotnet test', 'dotnet test', '.NET test projects');
     else addCheck('dotnet build', 'dotnet build', '.NET build');
   }
+  const androidManifest = files.find((f) => /(^|\/)AndroidManifest\.xml$/.test(f) && !/(^|\/)build\//.test(f));
+  const gradleFiles = manifests.filter((f) => /(^|\/)build\.gradle(\.kts)?$/i.test(f));
+  let androidApp = false;
+  for (const f of gradleFiles.slice(0, 12)) {
+    if (/com\.android\.application|android\.application/.test(await readText(path.join(root, files.find((x) => x.toLowerCase() === f) || f)).catch(() => ''))) androidApp = true;
+  }
+  if (androidApp || androidManifest) {
+    frameworks.push('android');
+    addStack('android', 'Android app (Gradle)', androidApp ? 0.97 : 0.75, androidApp ? 'build.gradle applies com.android.application' : `AndroidManifest.xml (${androidManifest})`);
+    tools.add('java'); tools.add('android-sdk'); tools.add('android-studio');
+    if (!files.some((f) => /(^|\/)gradlew(\.bat)?$/i.test(f))) tools.add('gradle');
+  }
   if (manifests.some((f) => /(^|\/)(pom\.xml|build\.gradle(\.kts)?)$/i.test(f)) || extCounts.java || extCounts.kotlin) {
     addStack(extCounts.kotlin ? 'kotlin' : 'java', extCounts.kotlin ? 'Kotlin / JVM' : 'Java / JVM', 0.9, 'Maven/Gradle or JVM sources');
     tools.add('java');
     if (files.includes('pom.xml')) addCheck('mvn test', 'mvn -q test', 'Maven tests');
-    else addCheck('gradle test', process.platform === 'win32' ? 'gradlew.bat test' : './gradlew test', 'Gradle tests');
+    else if (!androidApp) addCheck('gradle test', process.platform === 'win32' ? 'gradlew.bat test' : './gradlew test', 'Gradle tests');
   }
   if (manifests.some((f) => /(^|\/)(cmakelists\.txt|meson\.build)$/i.test(f)) || extCounts.c || extCounts.cpp) {
     addStack('cpp', 'C / C++', 0.85, 'CMake/Meson or native sources');

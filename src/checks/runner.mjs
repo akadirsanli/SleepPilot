@@ -5,6 +5,8 @@ import { redact } from '../util/redact.mjs';
 import { runHtmlSmoke } from './html-smoke.mjs';
 import { checkCitations } from './citations.mjs';
 import { runCargo, detectCargo } from '../reverse/rust.mjs';
+import { cachedAndroidToolchain } from '../android/toolchain.mjs';
+import { buildAndroid } from '../android/build.mjs';
 
 const tail = (s, n = 4000) => (s && s.length > n ? '…' + s.slice(-n) : s || '');
 
@@ -168,6 +170,19 @@ export async function runChecks({ projectDir, checks, changedFiles = [], command
         };
         results.push(result);
         settle?.(result);
+      } else if (check.type === 'android-build') {
+        // The real Gradle build of the app: an Android task is only verified when the APK builds.
+        const key = `android\u0000${check.module || ''}\u0000${check.variant || 'debug'}`;
+        if (commandCache?.has(key)) {
+          const cached = await commandCache.get(key);
+          results.push({ ...cached, ...base, startedAt: cached.startedAt, shared: true, output: `${cached.output}\n(run once for the parallel wave)` });
+          continue;
+        }
+        let settle = null;
+        if (commandCache) commandCache.set(key, new Promise((resolve) => (settle = resolve)));
+        const result = await runAndroidBuildCheck({ check, projectDir, base, started });
+        results.push(result);
+        settle?.(result);
       } else {
         results.push({ ...base, status: 'skipped', output: `Unknown check type: ${check.type}`, durationMs: 0 });
       }
@@ -176,6 +191,33 @@ export async function runChecks({ projectDir, checks, changedFiles = [], command
     }
   }
   return results;
+}
+
+async function runAndroidBuildCheck({ check, projectDir, base, started }) {
+  const toolchain = await cachedAndroidToolchain();
+  const missing = toolchain.problems.filter((p) => p.severity === 'error');
+  if (!toolchain.jdk.ok || !toolchain.sdk.found) {
+    // A missing JDK/SDK says nothing about the code: reported as an error (not a failed task).
+    return { ...base, status: 'error', durationMs: Date.now() - started, output: `The Android build could not run on this computer: ${missing.map((p) => `${p.title}. ${p.fix}`).join(' ') || 'JDK or Android SDK missing.'}` };
+  }
+  try {
+    const { result } = await buildAndroid({ projectDir, toolchain, variant: check.variant === 'release' ? 'release' : 'debug', kind: 'apk', module: check.module ?? null, timeoutMs: (check.timeoutSec || 2400) * 1000 });
+    const apk = result.artifacts[0];
+    const text = result.ok
+      ? `${result.task} succeeded in ${Math.round(result.durationMs / 1000)} s. APK: ${apk.path} (${(apk.size / 1048576).toFixed(1)} MB${apk.details?.manifest?.package ? `, ${apk.details.manifest.package} ${apk.details.manifest.versionName || ''}` : ''}).`
+      : `${result.task} failed.\n${result.diagnosis?.summary || ''}${result.diagnosis?.hints?.length ? `\nHints: ${result.diagnosis.hints.join(' ')}` : ''}\n\nLast lines of the build log:\n${result.log.slice(-60).join('\n')}`;
+    return {
+      ...base,
+      command: `gradle ${result.task}`,
+      status: result.ok ? 'passed' : 'failed',
+      exitCode: result.exitCode ?? null,
+      durationMs: Date.now() - started,
+      output: tail(text, 8000),
+      details: { task: result.task, artifacts: result.artifacts.map((a) => ({ path: a.path, size: a.size, package: a.details?.manifest?.package || null, versionName: a.details?.manifest?.versionName || null })), hints: result.diagnosis?.hints || [] },
+    };
+  } catch (err) {
+    return { ...base, status: 'error', durationMs: Date.now() - started, output: `The Android build could not start: ${redact(err.message)}` };
+  }
 }
 
 /** Summarise check results into one verification verdict for a task. */

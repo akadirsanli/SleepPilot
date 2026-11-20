@@ -407,12 +407,23 @@ export function classifyForEngine(engineId, error) {
   const c = classifyError(error);
   if (c?.category === 'auth') {
     c.hint = engineId === 'claude'
-      ? 'Sign in with `claude auth login` in a terminal, then reconnect the engine.'
+      ? 'Claude Code is not signed in for the user account that runs SleepPilot. In a terminal run `claude auth login` (or start `claude` and type /login), check it with `claude auth status`, then reconnect the engine and resume.'
       : engineId === 'codex'
         ? 'Sign in with `codex login` in a terminal, then reconnect the engine.'
         : c.hint;
   }
   return c;
+}
+
+/**
+ * Signed-in state from a CLI's plain-text status line: true, false or null (unknown).
+ * The negative forms are checked first — "Not logged in" also contains "logged in".
+ */
+export function signedInFromText(text) {
+  const t = String(text || '');
+  if (/\bnot\s+(?:logged|signed)\s+in\b|\blogged\s+out\b|\bsigned\s+out\b|please run \/login/i.test(t)) return false;
+  if (/\b(?:logged|signed)\s+in\b/i.test(t)) return true;
+  return null;
 }
 
 export function authHint(text) {

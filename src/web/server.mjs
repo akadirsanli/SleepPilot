@@ -1,4 +1,5 @@
 import http from 'node:http';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,6 +96,28 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
   route('POST', '/api/runs/:pid/:rid/steer', async (p, b) => app.controllerFor(p.rid).steer({ text: b.text, mode: b.mode }));
   route('POST', '/api/runs/:pid/:rid/permission', async (p, b) => (await app.controllerFor(p.rid).replyPermission(b.id, b.decision), { ok: true }));
   route('POST', '/api/runs/:pid/:rid/form', async (p, b) => (await app.controllerFor(p.rid).replyForm(b.id, b.answer), { ok: true }));
+  // Workspace
+  route('GET', '/api/workspace', async () => app.workspaceInfo());
+  route('POST', '/api/workspace', async (_, b) => app.setWorkspace(b || {}));
+  route('POST', '/api/workspace/open', async (_, b) => app.openWorkspaceFolder(b || {}));
+  // Live preview
+  route('GET', '/api/projects/:id/preview', async (p) => app.previewInfo(p.id));
+  route('POST', '/api/projects/:id/preview/config', async (p, b) => app.savePreviewConfig(p.id, b || {}));
+  route('POST', '/api/projects/:id/preview/start', async (p) => app.startPreview(p.id));
+  route('POST', '/api/projects/:id/preview/stop', async (p) => app.stopPreview(p.id));
+  // Android
+  route('GET', '/api/android/toolchain', async (_, __, q) => app.androidToolchain({ force: q.get('refresh') === '1' }));
+  route('POST', '/api/android/gradle/download', async (_, b) => app.androidDownloadGradle(b || {}));
+  route('GET', '/api/android/devices', async () => app.androidDevices());
+  route('GET', '/api/projects/:id/android', async (p) => app.androidProject(p.id));
+  route('POST', '/api/projects/:id/android/build', async (p, b) => app.androidBuild(p.id, b || {}));
+  route('POST', '/api/projects/:id/android/cancel', async (p) => app.androidCancelBuild(p.id));
+  route('POST', '/api/projects/:id/android/signing', async (p, b) => app.androidCreateKey(p.id, b || {}));
+  route('POST', '/api/projects/:id/android/install', async (p, b) => app.androidInstall(p.id, b || {}));
+  route('POST', '/api/projects/:id/android/logcat', async (p, b) => app.androidDeviceErrors(p.id, b || {}));
+  route('POST', '/api/projects/:id/android/wrapper', async (p) => app.androidAddWrapper(p.id));
+  route('POST', '/api/projects/:id/android/check', async (p) => app.androidAddCheck(p.id));
+  route('GET', '/api/projects/:id/android/file', async (p, _, q) => app.androidArtifactFile(p.id, q.get('path')));
 
   const handle = async (req, res, ctx) => {
     try {
@@ -150,6 +173,10 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
           }
           const params = Object.fromEntries(Object.entries(m.groups || {}).map(([k, v]) => [k, decodeURIComponent(v)]));
           const result = await r.handler(params, body, url.searchParams, ctx);
+          if (result && typeof result === 'object' && result.__file) {
+            await sendFile(res, result);
+            return;
+          }
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(result ?? null));
           return;
         }
@@ -168,7 +195,7 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
         res.writeHead(404).end();
         return;
       }
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" });
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src http://127.0.0.1:* http://localhost:*" });
       res.end(data);
     } catch (err) {
       log.warn(`request failed: ${err.message}`);
@@ -208,4 +235,26 @@ async function readBody(req) {
   }
   if (!s) return {};
   return JSON.parse(s);
+}
+
+/** Stream a file as a download (APK/AAB). The handler has already checked that the path may be served. */
+async function sendFile(res, { __file: file, name, type = 'application/octet-stream' }) {
+  const st = await fsp.stat(file);
+  const safeName = String(name || 'download').replace(/[^\w.-]+/g, '_');
+  res.writeHead(200, {
+    'content-type': type,
+    'content-length': st.size,
+    'content-disposition': `attachment; filename="${safeName}"`,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  });
+  await new Promise((resolve) => {
+    const stream = fs.createReadStream(file);
+    stream.on('error', () => {
+      res.destroy();
+      resolve();
+    });
+    stream.on('end', resolve);
+    stream.pipe(res);
+  });
 }

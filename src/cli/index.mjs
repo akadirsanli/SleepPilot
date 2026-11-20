@@ -14,7 +14,7 @@ import { rustStatus } from '../reverse/rust.mjs';
 import { REVERSE_MODES } from '../reverse/playbook.mjs';
 import { dataRoot } from '../util/paths.mjs';
 
-const VERSION = '2.4.1';
+const VERSION = '2.5.0';
 
 export const CLI_COMMANDS = ['run', 'ask', 'route', 'reverse', 'engines', 'doctor', 'web', 'help', 'version'];
 
