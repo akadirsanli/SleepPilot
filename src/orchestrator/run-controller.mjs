@@ -1195,7 +1195,7 @@ export class RunController extends EventEmitter {
       const { session } = await this.createRoleSession('reviewer', route, { title: `SleepPilot · ${this.project.name} · second opinion · ${task.id}`, task });
       this.sessionHarness.set(session.id, { ...route, sessionID: session.id });
       const prompt = P.secondOpinionPrompt({ objective: this.project.objective, task, reason, attempts: task.attemptLog || [], lastChecks, developerSummary, changedFiles, fromEngine: route.fresh ? devHarness : '' });
-      const rt = await this.roleTurn('reviewer', session.id, prompt, { iterationN: n, task, tag: 'second opinion', taskType: 'review' });
+      const rt = await this.roleTurn('reviewer', session.id, prompt, { iterationN: n, task, tag: 'second opinion', taskType: 'review', usageRole: 'second_opinion' });
       const j = extractJson(rt.finalText || rt.allText);
       if (!j || (!j.diagnosis && !j.advice)) {
         this.addLog({ kind: 'warning', role: 'reviewer', text: `The second opinion on [${task.id}] could not be read; the run continues without it.` });
@@ -1412,7 +1412,7 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
   }
 
   /** Run a turn for any role with persistence-before-submit, live streaming and usage accounting. */
-  async roleTurn(role, sessionID, text, { iterationN, tag, task = null, taskType = null, fallbackDepth = 0, attempted = [] } = {}) {
+  async roleTurn(role, sessionID, text, { iterationN, tag, task = null, taskType = null, fallbackDepth = 0, attempted = [], usageRole = null } = {}) {
     const run = this.run;
     const route = this.sessionRoute(sessionID);
     const maxSwitches = Number(this.routing?.maxSwitches) || 8;
@@ -1443,7 +1443,7 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
       }
       this.quotaSnapshot();
       await this.persist();
-      return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness] });
+      return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness], usageRole });
     }
 
     const adapter = await this.ensureHarness(route.harness);
@@ -1518,7 +1518,8 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     // Until this iteration is evaluated (diff, checks, decision) a crash must not lose the finished
     // turn: recovery then evaluates THIS turn from the engine's records instead of re-running the task.
     if (role === 'developer' && iterationN != null) (run.evaluating ||= {})[iterationN] = { ...rec, endedAt: Date.now() };
-    this.addUsage(role, result.usage);
+    // Turns that only borrow a role's session rules (e.g. a second opinion) are billed under their own name.
+    this.addUsage(usageRole || role, result.usage);
     this.addLog({ kind: 'turn-end', role, turn: messageId, status: result.status, text: `${pre}${roleLabel(role)} turn finished on ${route.harness}: ${turnStatusLabel(result.status)}${result.usage ? ` · estimated cost $${result.usage.cost.toFixed(4)} · ${result.usage.tokens.input + result.usage.tokens.output} tokens` : ''}` });
     this.run.pending.permissions = this.run.pending.permissions.filter((p) => p.sessionID !== sessionID);
     this.run.pending.forms = this.run.pending.forms.filter((p) => p.sessionID !== sessionID);
@@ -1542,7 +1543,7 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
             task.reviewSession = { id: created.session.id, model: `${next.harness}/${next.modelProfile || 'default'}`, harness: next.harness, modelProfile: next.modelProfile };
           }
           await this.persist();
-          return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness] });
+          return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness], usageRole });
         }
       }
       throw new ProviderFailure(providerErr.classification, role);
@@ -2510,7 +2511,7 @@ function isPlaceholderTask(raw) {
 }
 
 function roleLabel(role) {
-  return { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check' }[role] || role;
+  return { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check', second_opinion: 'Second opinion' }[role] || role;
 }
 
 function lineTotals(patches) {

@@ -196,7 +196,7 @@ const TURN = {
   succeeded: 'succeeded', failed: 'failed', interrupted: 'interrupted', running: 'running', lost: 'lost', not_found: 'not found',
   completed: 'completed', provider_error: 'provider error', not_submitted: 'not sent',
 };
-const ROLE = { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check' };
+const ROLE = { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check', second_opinion: 'Second opinion' };
 const runBadge = (state) => badge(...(RUN_STATE[state] || [state, 'badge-muted']));
 const taskBadge = (status) => badge(...(TASK_STATUS[status] || [status, 'badge-muted']));
 
@@ -1813,7 +1813,7 @@ function appSettingsHtml() {
   return `<div class="card flat">
     <div class="card-head"><h2>Application</h2></div>
     <div class="kv">
-      <div>Version</div><div>${esc(S.state.app?.version || '2.5.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
+      <div>Version</div><div>${esc(S.state.app?.version || '2.6.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
       <div>Data folder</div><div class="mono mono-wrap">${esc(S.state.app?.dataRoot || S.state.appDataRoot || 'per-user application data')}</div>
       <div>Default engine</div><div>${esc(engineById(defaultEngineId())?.label || defaultEngineId())}</div>
       <div>Platform</div><div>${esc(S.state.app?.platform || '')} · ${esc(S.state.app?.arch || '')} · Node ${esc(S.state.app?.node || '')}</div>

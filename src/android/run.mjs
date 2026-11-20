@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { resolveSpawn, runFile } from '../util/proc.mjs';
+import { killTree, resolveSpawn, runFile } from '../util/proc.mjs';
 import { redact } from '../util/redact.mjs';
 import { logger } from '../util/log.mjs';
 import { androidProcessEnv } from './toolchain.mjs';
@@ -62,9 +62,7 @@ export async function startEmulator(toolchain, avd, { timeoutMs = 6 * 60_000, on
     }
     await sleep(3000);
   }
-  try {
-    child.kill();
-  } catch {}
+  killTree(child.pid);
   throw new Error(`The emulator "${avd}" did not finish booting within ${Math.round(timeoutMs / 60_000)} min.`);
 }
 
@@ -161,11 +159,8 @@ export async function runAndroidApp({ toolchain, apk, packageName, serial = null
 
 /** Stop the emulators SleepPilot started (app shutdown). */
 export function stopStartedEmulators() {
-  for (const { child } of started.values()) {
-    try {
-      child.kill();
-    } catch {}
-  }
+  // The whole tree: on Windows the started process can be a launcher (cmd/.bat) of the emulator.
+  for (const { child } of started.values()) killTree(child.pid);
   started.clear();
 }
 

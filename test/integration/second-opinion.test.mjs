@@ -68,3 +68,9 @@ test('second opinion: an unreadable answer is ignored; switched off means never 
   assert.ok(!off.run.tasks.some((x) => x.secondOpinions?.length));
   assert.ok(!off.events.some((e) => /Second opinion/.test(e.text || '')));
 });
+
+test('second opinion: its turns are billed under their own name, not as reviewer turns', { timeout: 180_000 }, async () => {
+  const { run } = await runWith('so-usage', 'retry', { reviewerEnabled: false });
+  assert.ok(run.usage.byRole.second_opinion?.turns >= 1, JSON.stringify(Object.keys(run.usage.byRole)));
+  assert.equal(run.usage.byRole.reviewer.turns, 0);
+});

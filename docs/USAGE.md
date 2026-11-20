@@ -131,6 +131,26 @@ Nothing is pushed automatically. If `gh` is missing, the card explains that crea
 
 Closing the browser window does not stop a run. Closing the console window stops SleepPilot. You can also right-click anywhere in the app (not inside an input) for a context menu with **Close SleepPilot**, **Close this window** and **Reload interface**. Closing SleepPilot saves active runs as cleanly stopped, so they will not resume by themselves.
 
+### Assistant (💬)
+
+The round button in the lower-right corner opens the assistant.
+
+- **Status cards** appear at once, without any model call: an engine that is not connected or not signed in (with the exact command, e.g. `claude auth login`), a paused or failed run and why, runs waiting for you, blocked tasks, a project without goal or checks, missing Android tools, no workspace. Each card has a button to the screen that fixes it; the number on the round button counts the warnings.
+- **Questions**: ask anything about SleepPilot, your project or the run ("Why did it stop?", "What should I do next?", "Explain this screen"). The assistant sees the live state and the text of the screen you are on; secrets are removed first. It only explains and suggests — it never changes settings or runs.
+- **Models (⚙)**: choose a preferred engine + model and two alternatives. When the first is not available (engine missing, signed out, out of quota, error, no answer in 3 minutes) the second answers, then the third; the answer says which one replied. The choice and the conversation are kept; 🗑 clears the conversation. A small, fast model is enough. Settings → App can hide the button.
+
+### Second opinion
+
+When a task is stuck — the same check failure comes back, it is about to be blocked after repeated failures, the last two attempts changed nothing, or the developer stalled or ran out of time — another engine looks at it before the next attempt. SleepPilot prefers a connected engine that is different from the developer's (for example Codex when the developer is Claude Code); otherwise it uses a fresh read-only session. It reads the attempts, the failing checks and the files and answers with a diagnosis and exact advice, which opens the developer's next prompt. It may also split a task that is too big into 2–4 parts, or give up on one that cannot succeed on this computer (for example a missing tool). A task about to be blocked gets one more round with the advice. At most two second opinions per task; switch it off under Project → Advanced → *Second opinion when stuck*. Its cost appears as "Second opinion" in the report.
+
+### Reviewer screenshots
+
+For projects with HTML pages (and Edge or Chrome installed), the reviewer may ask to *see* the result when the diff and the checks are not enough — at most three pages, in desktop, phone or tablet size. SleepPilot takes the screenshots in a headless browser, saves them in `.sleeppilot/screens/` (ignored by Git and by change tracking) and the reviewer gives its final verdict with the images. Nothing is captured unless the reviewer asks.
+
+### MCP servers
+
+**Settings → MCP** gives the coding agents extra tools through MCP servers: a real browser (Playwright), current library documentation (Context7) or any other server (a command such as `npx -y some-mcp-server`, or an `https://` URL). They are passed to Claude Code, Codex and OpenCode in each one's own format. *Developer only* (default) or *All roles* — the manager and reviewer stay read-only either way. If a server needs a token, enter the variable name and click *set value…*: the value is stored in the credential file, never in the settings, and is removed from logs.
+
 ### Live preview
 
 The **Preview** screen shows the project's web app while the agent writes it (phone, tablet, desktop or full size) and reloads on every saved file; JavaScript errors appear in its console panel. A run starts the static preview by itself. Projects built by a bundler (Vite, Next.js, …) run their own dev server after you approve the command. Details: [ANDROID.md](ANDROID.md#live-preview).
@@ -150,6 +170,10 @@ Leave the PC on with SleepPilot running and use your phone as the remote.
 From the phone you can start runs, pause, stop, add time, steer, edit tasks and answer permissions and questions, at home or away. SleepPilot listens only on the PC's Tailscale address, so it is never reachable from the Wi-Fi or the internet. The phone cannot see or change API keys, open the folder dialog, close SleepPilot or change phone access; do those on the PC.
 
 The QR code is the key: do not share a photo of it. **Sign out all phones** makes a new one. If the page shows *Waiting for Tailscale*, Tailscale is not running or not signed in on the PC; SleepPilot checks again every minute.
+
+### Sounds
+
+A short sound plays when a run finishes, fails or needs you. Turn it off (or play a test) under Settings → App.
 
 ## 6. After the run
 
