@@ -382,3 +382,48 @@ body.on-phone .preview-stage { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------------------------------------------------------------- assistant chat box */
+.assistant-fab { position: fixed; right: 20px; bottom: 20px; z-index: 45; width: 54px; height: 54px; border-radius: 50%; border: 1px solid rgba(110, 231, 200, .45); background: linear-gradient(180deg, #1d2b4f, #131c36); color: var(--text); font-size: 24px; cursor: pointer; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); transition: transform .15s ease, box-shadow .15s ease; }
+.assistant-fab:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(0, 0, 0, .5); }
+.assistant-fab.active { border-color: var(--accent); }
+.assistant-fab-badge { position: absolute; top: -3px; right: -3px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--warn); color: #10172b; font-size: 12px; font-weight: 700; line-height: 20px; }
+.assistant-fab-badge.bad { background: var(--bad); color: #fff; }
+.assistant-panel { position: fixed; right: 20px; bottom: 86px; z-index: 46; width: min(420px, calc(100vw - 32px)); height: min(620px, calc(100vh - 120px)); display: flex; flex-direction: column; background: var(--panel, #131b33); border: 1px solid var(--line-2, #2c3a66); border-radius: 16px; box-shadow: 0 20px 60px rgba(0, 0, 0, .55); overflow: hidden; animation: assistantIn .18s ease both; }
+@keyframes assistantIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+.assistant-head { display: flex; align-items: center; gap: 6px; padding: 12px 12px 10px 14px; border-bottom: 1px solid var(--line); }
+.assistant-head .hint { margin: 0; }
+.icon-btn { background: none; border: 1px solid transparent; color: var(--muted); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 14px; }
+.icon-btn:hover, .icon-btn.active { border-color: var(--line); color: var(--text); }
+.assistant-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.assistant-status { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.assistant-status.ok { color: var(--ok); font-size: 12.5px; }
+.assistant-card { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: 9px; padding: 7px 9px; font-size: 12.5px; background: rgba(10, 16, 32, .35); }
+.assistant-card.error { border-left-color: var(--bad); }
+.assistant-card.warn { border-left-color: var(--warn); }
+.assistant-card .hint { margin-top: 2px; }
+.assistant-msg { margin: 8px 0; padding: 8px 11px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; max-width: 92%; word-wrap: break-word; }
+.assistant-msg.user { margin-left: auto; background: rgba(110, 231, 200, .14); border: 1px solid rgba(110, 231, 200, .25); white-space: pre-wrap; }
+.assistant-msg.bot { background: var(--bg-2); border: 1px solid var(--line); }
+.assistant-msg.bot.bad { border-color: rgba(255, 114, 133, .45); }
+.assistant-msg p { margin: 0 0 6px; }
+.assistant-msg p:last-child { margin-bottom: 0; }
+.assistant-msg ul { margin: 4px 0; padding-left: 18px; }
+.assistant-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.assistant-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.assistant-quick .chip { font-size: 12px; padding: 5px 10px; }
+.assistant-foot { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--line); }
+.assistant-foot textarea { flex: 1; resize: none; min-height: 40px; max-height: 120px; }
+.assistant-typing { display: inline-flex; gap: 4px; }
+.assistant-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: chatPulse 1.2s ease-in-out infinite; }
+.assistant-typing i:nth-child(2) { animation-delay: .2s; }
+.assistant-typing i:nth-child(3) { animation-delay: .4s; }
+.assistant-choice { margin-bottom: 10px; }
+.assistant-choice .row { flex-wrap: nowrap; }
+.assistant-choice select { max-width: 48%; }
+.assistant-choice input { flex: 1; min-width: 0; }
+.assistant-empty { display: grid; place-items: center; height: 100%; }
+@media (max-width: 760px) {
+  .assistant-fab { right: 14px; bottom: 14px; width: 50px; height: 50px; }
+  .assistant-panel { right: 8px; left: 8px; width: auto; bottom: 74px; height: calc(100vh - 100px); }
+}

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { newProvider, normalizeProvider } from './engines/api/providers.mjs';
+import { sanitizeAssistantSettings } from './assistant/assistant.mjs';
 
 export const ENGINE_IDS = ['opencode', 'claude', 'codex', 'api', 'dsh', 'cli'];
 
@@ -82,6 +83,11 @@ export function defaultSettings() {
       jdkHome: null,
       sdkDir: null,
       gradlePath: null,
+    },
+    // In-app assistant (chat box): up to three { engine, model } choices, tried in order.
+    assistant: {
+      enabled: true,
+      models: [],
     },
   };
 }
@@ -191,5 +197,6 @@ export function sanitizeSettings(raw = {}) {
       sdkDir: absOrNull(r.android?.sdkDir),
       gradlePath: absOrNull(r.android?.gradlePath),
     },
+    assistant: sanitizeAssistantSettings(r.assistant, ENGINE_IDS),
   };
 }

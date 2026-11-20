@@ -1,5 +1,6 @@
 // SleepPilot UI — vanilla JS, no build step.
 import { morph } from './dom.js';
+import { initAssistant, assistantRefresh, assistantEvent } from './assistant.js';
 import { initChat, CHAT, chatReset, chatLoad, chatApply, chatTurnFinished, chatSchedule, chatRender, chatPanelHtml } from './chat.js';
 import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange } from './workbench.js';
 
@@ -299,6 +300,8 @@ function connectEvents() {
         const c = $('#runControls');
         if (c && S.run) c.innerHTML = runControlsHtml(S.run);
       }
+    } else if (msg.type === 'assistant') {
+      assistantEvent(msg.data);
     } else if (msg.type === 'android-build') {
       onAndroidBuildEvent(msg.data);
     } else if (msg.type === 'android-toolchain') {
@@ -348,6 +351,10 @@ function onRunUpdate(run) {
   }
   renderRunBadge(run);
   notifyRunChange(run);
+  if (run.projectId === S.projectId && lastRunState.get(`a:${run.id}`) !== run.state) {
+    lastRunState.set(`a:${run.id}`, run.state);
+    assistantRefresh();
+  }
   if (S.run?.id === run.id) {
     S.run = run;
     if (S.view === 'run') updateRunView(run);
@@ -419,6 +426,7 @@ function setActiveNav(view) {
 
 function render() {
   setActiveNav(S.view);
+  assistantRefresh();
   const map = { home: renderHome, project: renderProject, run: renderRun, report: renderReportView, insights: renderInsightsView, reverse: renderReverseView, settings: renderSettingsView, preview: () => (S.project ? renderPreviewView() : renderNeedProject()), android: () => (S.project ? renderAndroidView() : renderNeedProject()) };
   (map[S.view] || renderHome)();
 }
@@ -2613,6 +2621,7 @@ document.addEventListener('keydown', (e) => {
 initChat({ S, api, esc, fmtClock, fmtDur, fmtTime, num, markdown, TURN });
 initWorkbench({ S, api, esc, badge, toast, fmtTime, fmtDur, num, openModal, rerender: () => render() });
 window.addEventListener('message', onPreviewMessage);
+initAssistant({ S, api, esc, markdown, go, openProject, toast });
 
 (async function boot() {
   await loadState();

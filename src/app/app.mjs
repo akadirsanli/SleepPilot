@@ -32,6 +32,7 @@ import { PreviewManager, detectPreview, effectivePreview, sanitizePreviewConfig 
 import { AndroidService } from '../android/service.mjs';
 import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
 import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
+import { Assistant, buildStatus, stateText } from '../assistant/assistant.mjs';
 import { logger } from '../util/log.mjs';
 
 const log = logger('app');
@@ -61,6 +62,7 @@ export class SleepPilotApp extends EventEmitter {
     this.keepAwake = new KeepAwake();
     this.previews = new PreviewManager();
     this.android = new AndroidService({ credentials: this.credentials, exportDirFor: (p) => this.exportDirFor(p) });
+    this.assistant = new Assistant({ manager: this.manager, getSettings: () => this.settings });
   }
 
   /** The engine of the default (most recently selected) backend. Kept for compatibility. */
@@ -78,6 +80,8 @@ export class SleepPilotApp extends EventEmitter {
     this.previews.on('update', (u) => this.emit('broadcast', { type: 'preview', data: u }));
     this.android.on('update', (u) => this.emit('broadcast', { type: 'android-build', data: u }));
     this.android.on('toolchain', (u) => this.emit('broadcast', { type: 'android-toolchain', data: u }));
+    this.assistant.on('delta', (d) => this.emit('broadcast', { type: 'assistant', data: { ...d, kind: 'delta' } }));
+    this.assistant.on('progress', (d) => this.emit('broadcast', { type: 'assistant', data: { ...d, kind: 'progress' } }));
     this.manager.on('status', () => this.emit('broadcast', { type: 'engines', data: this.enginesView() }));
     this.manager.on('stream', (s) => this.emit('broadcast', { type: 'stream', data: s }));
     if (this.recover) await this.recoverRuns();
@@ -468,6 +472,58 @@ export class SleepPilotApp extends EventEmitter {
     const plan = effectivePreview(config, await detectPreview(project.dir));
     if (plan.mode !== 'static') return;
     await this.previews.start(project, plan).catch((err) => log.info(`preview not started: ${err.message}`));
+  }
+
+  // ------------------------------------------------------------------ assistant (chat box)
+
+  /** Project, run (live view or stored) and its recent events for the assistant's context. */
+  async assistantContext({ projectId = null, runId = null } = {}) {
+    const project = projectId ? await this.store.getProject(projectId).catch(() => null) : null;
+    let run = null;
+    let events = [];
+    const id = runId || project?.lastRunId || null;
+    if (project && id) {
+      const c = this.controllers.get(id);
+      run = c ? c.view() : await this.store.getRun(project.id, id).catch(() => null);
+      events = c?.logBuffer?.length ? c.logBuffer.slice(-200) : await this.store.readEvents(project.id, id, 200).catch(() => []);
+    }
+    const state = await this.state();
+    const workspace = { configured: !!this.settings.workspace?.dir };
+    let androidToolchain = null;
+    if (project?.kind === 'android') {
+      const { summarizeToolchain } = await import('../android/service.mjs');
+      androidToolchain = summarizeToolchain(await this.android.toolchain().catch(() => null));
+    }
+    const status = buildStatus({ state, project, run, androidToolchain, workspace });
+    return { state, project, run, events, status, preview: project ? this.previews.view(project.id) : null };
+  }
+
+  async assistantView({ projectId = null, runId = null } = {}) {
+    const ctx = await this.assistantContext({ projectId, runId });
+    const history = await this.assistant.loadHistory();
+    const engines = this.enginesView().engines.map((e) => ({ id: e.id, label: e.label, state: e.status?.state || 'disconnected', models: (e.models || []).slice(0, 200).map((m) => (e.id === 'opencode' || e.id === 'api' ? `${m.providerID}/${m.id}` : m.id)) }));
+    return { settings: this.settings.assistant, candidates: this.assistant.candidates(), engines, status: ctx.status, history: history.slice(-40), busy: !!this.assistant.busy };
+  }
+
+  async assistantAsk({ question, projectId = null, runId = null, view = null, screen = null, id } = {}) {
+    const ctx = await this.assistantContext({ projectId, runId });
+    const live = stateText(ctx);
+    const scr = screen ? { view: String(view || ''), text: String(screen).slice(0, 20_000) } : null;
+    try {
+      return await this.assistant.ask({ id, question, live, screen: scr, directory: ctx.project?.dir || null });
+    } catch (err) {
+      return { id, answer: null, error: err.message, attempts: err.attempts || [] };
+    }
+  }
+
+  async saveAssistantSettings(patch = {}) {
+    await this.saveSettings({ assistant: { ...(this.settings.assistant || {}), ...patch } });
+    return this.assistantView();
+  }
+
+  async clearAssistant() {
+    await this.assistant.clear();
+    return { ok: true };
   }
 
   // ------------------------------------------------------------------ android
