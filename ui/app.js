@@ -203,6 +203,19 @@ function renderEngineBadge() {
   b.title = e.status?.message || '';
   b.style.color = st === 'connected' ? 'var(--ok)' : st === 'error' ? 'var(--bad)' : 'var(--warn)';
 }
+/** Phone access is a whole feature behind the 8th Settings tab; the top bar keeps it one click away. */
+function renderPhoneBadge(phone = S.phone) {
+  const b = $('#phoneBadge');
+  if (!b) return;
+  // On the phone itself the button would only lead to "change this on the PC".
+  b.hidden = !!S.state?.viewer?.phone;
+  const enabled = phone ? !!phone.enabled : !!S.state?.settings?.phone?.enabled;
+  const listening = phone ? !!phone.listening : null;
+  b.textContent = enabled ? (listening === false ? '📱 Phone: waiting for Tailscale' : '📱 Phone: on') : '📱 Connect phone';
+  b.title = enabled ? 'Phone access is on. Click to see the QR code.' : 'Control SleepPilot from your phone: scan a QR code (Settings → Phone).';
+  b.style.color = enabled ? (listening === false ? 'var(--warn)' : 'var(--ok)') : '';
+}
+
 function renderRunBadge(run = S.run) {
   const b = $('#runBadge');
   if (!b) return;
@@ -225,6 +238,7 @@ async function loadState() {
   if (S.projectId && !S.state.projects.some((p) => p.id === S.projectId)) S.projectId = null;
   if (!S.projectId && S.state.activeRuns?.length) S.projectId = S.state.activeRuns[0].projectId;
   renderEngineBadge();
+  renderPhoneBadge();
 }
 
 async function loadProject(id = S.projectId, { keepRun = false } = {}) {
@@ -426,6 +440,7 @@ async function renderHome() {
       <div class="row">
         <button class="btn btn-primary" data-act="focusNewProject">Start a project</button>
         <button class="btn" data-act="goReverse">Sleep &amp; Reverse &amp; Rust It</button>
+        ${S.state?.viewer?.phone ? '' : `<button class="btn btn-ghost" data-act="openPhoneSettings">📱 ${S.state?.settings?.phone?.enabled ? 'Phone access' : 'Connect your phone'}</button>`}
         <button class="btn btn-ghost" data-act="goSettings">Configure engines</button>
       </div>
     </div>
@@ -1432,6 +1447,8 @@ async function loadPhonePanel(view = null) {
     return;
   }
   box.innerHTML = phonePanelHtml(S.phone);
+  if (S.state?.settings) S.state.settings.phone = { ...(S.state.settings.phone || {}), enabled: !!S.phone.enabled };
+  renderPhoneBadge(S.phone);
 }
 
 function phoneSettingsHtml() {
@@ -1764,6 +1781,10 @@ function appSettingsHtml() {
 // ------------------------------------------------------------------ ACTIONS
 
 const ACTIONS = {
+  openPhoneSettings: () => {
+    S.settingsTab = 'phone';
+    return go('settings');
+  },
   goPreview: () => go('preview'),
   goAndroid: () => go('android'),
   goHome: () => go('home'),

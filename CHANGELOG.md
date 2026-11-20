@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Phone access is one click away.** A 📱 button in the top bar (and on the Home
+  screen) shows whether phone access is on and opens its QR code; before, it was
+  only reachable as the last-but-one tab of Settings.
 - **Workspace.** Settings → Workspace (or the Home card) chooses one folder for all
   projects. SleepPilot keeps `projects/<name>/` and `exports/<name>/` inside it; a
   new project then needs only a name, and folder names are made safe for build
