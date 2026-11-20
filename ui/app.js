@@ -108,13 +108,53 @@ async function api(method, path, body) {
   }
 }
 
+/** Stacked notifications: several can be visible; errors stay longer; click to dismiss. */
 function toast(msg, bad = false) {
-  const t = $('#toast');
+  const box = $('#toasts');
+  if (!box) return;
+  // The same message again only restarts its timer instead of stacking duplicates.
+  const same = [...box.children].find((t) => t.dataset.msg === String(msg));
+  const t = same || document.createElement('div');
+  t.className = `toast${bad ? ' bad' : ''}`;
+  t.dataset.msg = String(msg);
   t.textContent = msg;
-  t.className = 'toast' + (bad ? ' bad' : '');
-  t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), bad ? 8000 : 3800);
+  t.title = 'Click to dismiss';
+  const close = () => {
+    t.classList.add('leaving');
+    setTimeout(() => t.remove(), 200);
+  };
+  t.onclick = close;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(close, bad ? 8000 : 3800);
+  if (!same) box.appendChild(t);
+  while (box.children.length > 4) box.firstElementChild.remove();
+}
+
+/**
+ * Short, original chimes made with the Web Audio API (no sound files): finished = rising two
+ * notes, needs you = two equal notes, failed = falling notes. Off under Settings → App.
+ */
+let audioCtx = null;
+function playSound(kind) {
+  if (S.state?.settings?.ui?.sound === false || S.state?.viewer?.phone) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const notes = { done: [659.25, 987.77], attention: [880, 880], failed: [523.25, 349.23] }[kind] || [740];
+    const t0 = audioCtx.currentTime + 0.02;
+    notes.forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const start = t0 + i * 0.18;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.32);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.35);
+    });
+  } catch {}
 }
 
 async function guarded(fn) {
@@ -367,7 +407,11 @@ function onRunUpdate(run) {
 function notifyRunChange(r) {
   const prev = lastRunState.get(r.id);
   lastRunState.set(r.id, r.state);
-  if (!prev || prev === r.state || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!prev || prev === r.state) return;
+  if (['completed', 'stopped'].includes(r.state)) playSound('done');
+  else if (r.state === 'failed') playSound('failed');
+  else if (r.state === 'waiting_user' || (r.state === 'paused' && r.pause?.code !== 'user_paused')) playSound('attention');
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const tc = r.taskCounts || {};
   const done = `${tc.verified || 0} verified${tc.implemented_unverified ? `, ${tc.implemented_unverified} not verified` : ''}`;
   let body = null;
@@ -1773,6 +1817,8 @@ function appSettingsHtml() {
       <div>GitHub CLI</div><div><div class="row"><input type="text" id="setGhPath" value="${esc(S.state.settings?.github?.ghPath || '')}" placeholder="gh (auto-detect)" style="max-width:260px"><select id="setGhVisibility" style="max-width:120px"><option value="private" ${S.state.settings?.github?.defaultVisibility !== 'public' ? 'selected' : ''}>private</option><option value="public" ${S.state.settings?.github?.defaultVisibility === 'public' ? 'selected' : ''}>public</option></select><button class="btn btn-small" data-act="saveAppSettings">Save</button></div><div class="hint">GitHub actions are explicit; SleepPilot never pushes automatically.</div></div>
     </div>
     <label class="check"><input type="checkbox" id="setNotifications" ${typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'checked' : ''}> Desktop notifications for finished or paused runs</label>
+    <label class="check"><input type="checkbox" id="setSound" ${S.state.settings?.ui?.sound !== false ? 'checked' : ''}> Play a short sound when a run finishes, fails or needs you <a href="#" data-act="testSound" class="hint">(test)</a></label>
+    <label class="check"><input type="checkbox" id="setAssistant" ${S.state.settings?.assistant?.enabled !== false ? 'checked' : ''}> Show the assistant button (💬, lower-right corner)</label>
     <div class="row" style="margin-top:10px"><button class="btn" data-act="enableNotifications">Enable notifications</button><button class="btn btn-ghost" data-act="goHome">Projects</button></div>
     <div class="hint" style="margin-top:10px">SleepPilot stores projects and runs under %LOCALAPPDATA%\\SleepPilot (Windows) or ~/.local/share/SleepPilot. Nothing is written into a project folder except by the agent itself.</div>
   </div>`;
@@ -1781,6 +1827,12 @@ function appSettingsHtml() {
 // ------------------------------------------------------------------ ACTIONS
 
 const ACTIONS = {
+  testSound: () => {
+    const was = S.state?.settings?.ui?.sound;
+    if (S.state?.settings?.ui) S.state.settings.ui.sound = true;
+    playSound('done');
+    if (S.state?.settings?.ui) S.state.settings.ui.sound = was;
+  },
   openPhoneSettings: () => {
     S.settingsTab = 'phone';
     return go('settings');
@@ -2039,6 +2091,8 @@ const ACTIONS = {
     const n = Math.max(1, Math.min(12, Number($('#setMaxRuns')?.value) || 3));
     const patch = {
       maxConcurrentRuns: n,
+      ui: { ...(S.state.settings?.ui || {}), sound: !!$('#setSound')?.checked },
+      assistant: { ...(S.state.settings?.assistant || {}), enabled: !!$('#setAssistant')?.checked },
       github: {
         ...(S.state.settings?.github || {}),
         ghPath: $('#setGhPath')?.value.trim() || null,
@@ -2048,6 +2102,7 @@ const ACTIONS = {
     await saveSettingsPatch(patch);
     await loadState();
     renderSettingsView();
+    assistantRefresh();
     toast('App settings saved.');
   },
   enableNotifications: async () => {

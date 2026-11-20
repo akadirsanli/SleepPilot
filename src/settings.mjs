@@ -68,6 +68,8 @@ export function defaultSettings() {
     ui: {
       notifications: true,
       reducedMotion: false,
+      // A short sound when a run finishes, fails or needs the user (Settings → App).
+      sound: true,
     },
     // Phone access over Tailscale (Settings → Phone). Off until the user turns it on.
     phone: {
@@ -184,6 +186,7 @@ export function sanitizeSettings(raw = {}) {
     ui: {
       notifications: r.ui?.notifications !== false,
       reducedMotion: !!r.ui?.reducedMotion,
+      sound: r.ui?.sound !== false,
     },
     phone: {
       enabled: r.phone?.enabled === true,

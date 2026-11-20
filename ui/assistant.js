@@ -91,6 +91,10 @@ function toggle(force) {
 }
 
 function renderFab() {
+  // Settings → App can hide the button; an open panel closes with it.
+  const enabled = A.view?.settings?.enabled !== false;
+  $('#assistantFab').hidden = !enabled;
+  if (!enabled && A.open) toggle(false);
   const items = A.view?.status || [];
   const n = items.filter((s) => s.level !== 'info').length;
   const badge = $('#assistantFab .assistant-fab-badge');
