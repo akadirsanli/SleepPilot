@@ -252,7 +252,18 @@ working.
   straight to your phone.
 
 No Android setup puzzle: Android Studio's JDK and SDK are found automatically, and every missing
-piece comes with the exact fix. Details: **[docs/ANDROID.md](docs/ANDROID.md)**.
+piece comes with the exact fix. After each build the app can also be started on a phone or a headless
+emulator, so a crash fails the task. Details: **[docs/ANDROID.md](docs/ANDROID.md)**.
+
+## 🧠 Help when it gets stuck
+
+- **Assistant (💬).** A chat in the corner that knows the state of the app, the project and the run:
+  it shows what needs attention at once and answers questions with the model you choose — with two
+  fallbacks if that model is not available.
+- **Second opinion.** When a task fails the same way twice, loops or stalls, a different engine
+  diagnoses it and tells the developer what to do differently — or splits the task.
+- **Eyes for the reviewer.** The reviewer can ask for screenshots of the pages it needs to see.
+- **MCP tools.** Give Claude Code, Codex and OpenCode a browser, docs lookup or any MCP server.
 
 ## 🦀 Sleep & Reverse & Rust It
 

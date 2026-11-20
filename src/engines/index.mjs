@@ -30,6 +30,7 @@ export class EngineManager extends EventEmitter {
     const opencode = new OpenCodeAdapter({ settings: this.settings, testCommand: this.testCommand });
     opencode.id = 'opencode';
     opencode.label = 'OpenCode';
+    opencode.credentials = this.credentials;
     const api = new ApiEngine(common);
     const claude = new ClaudeEngine(common);
     const codex = new CodexEngine(common);

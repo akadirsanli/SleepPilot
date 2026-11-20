@@ -1,3 +1,4 @@
+import { serversFor, opencodeMcpConfig } from '../mcp/mcp.mjs';
 import { EventEmitter } from 'node:events';
 import { detectOpenCode } from './detect.mjs';
 import { OpenCodeServerProcess } from './server-process.mjs';
@@ -93,6 +94,10 @@ export class OpenCodeAdapter extends EventEmitter {
       }
       command = { exe: this.detection.path };
     }
+    // MCP servers (Settings → MCP) are part of the server's configuration: changing them needs a
+    // reconnect, which SleepPilot does by itself when no run is active.
+    const mcpConfig = opencodeMcpConfig(serversFor(this.settings, { engine: 'opencode', getEnv: (n) => this.credentials?.getEnv(n) || '' }));
+    if (mcpConfig) command = { ...command, env: { ...(command.env || {}), OPENCODE_CONFIG_CONTENT: JSON.stringify(mcpConfig) } };
     this.setStatus('starting', 'Starting the OpenCode server…');
     server = this.server = new OpenCodeServerProcess(command);
     let conn;

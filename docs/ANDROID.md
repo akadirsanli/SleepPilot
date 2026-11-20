@@ -115,6 +115,19 @@ Android templates add the **Android build** check (also available for imported p
 only accepts the task when an APK is produced. A machine without a JDK/SDK reports the check as
 an environment error, not as a broken task.
 
+### Does the app start? (run check)
+
+*Also start the app after each build* adds the **Android run** check after the build check. It installs
+the newest debug APK, starts it from its launcher icon, waits a few seconds and fails the task when the
+app crashed (the stack trace from the device log goes to the developer) or is no longer running. One
+screenshot of the device is saved to `.sleeppilot/screens/`; the reviewer can open it.
+
+The device is a USB phone with USB debugging (first choice) or a running emulator. When none is
+connected and an emulator image exists (Android Studio → Device Manager), SleepPilot starts it without a
+window, waits until Android has booted, keeps it running for the following checks and stops it when
+SleepPilot closes. No device and no emulator image is reported as an environment problem, not as a
+broken task.
+
 ### Release signing
 
 **Create release key** makes a 4096-bit RSA key with the JDK's `keytool`, valid for 30 years. The

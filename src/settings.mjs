@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { newProvider, normalizeProvider } from './engines/api/providers.mjs';
+import { sanitizeAssistantSettings } from './assistant/assistant.mjs';
+import { sanitizeMcpSettings } from './mcp/mcp.mjs';
 
 export const ENGINE_IDS = ['opencode', 'claude', 'codex', 'api', 'dsh', 'cli'];
 
@@ -67,6 +69,8 @@ export function defaultSettings() {
     ui: {
       notifications: true,
       reducedMotion: false,
+      // A short sound when a run finishes, fails or needs the user (Settings → App).
+      sound: true,
     },
     // Phone access over Tailscale (Settings → Phone). Off until the user turns it on.
     phone: {
@@ -82,6 +86,15 @@ export function defaultSettings() {
       jdkHome: null,
       sdkDir: null,
       gradlePath: null,
+    },
+    // MCP servers for the coding agents (Settings → MCP). Environment values live in credentials.
+    mcp: {
+      servers: [],
+    },
+    // In-app assistant (chat box): up to three { engine, model } choices, tried in order.
+    assistant: {
+      enabled: true,
+      models: [],
     },
   };
 }
@@ -178,6 +191,7 @@ export function sanitizeSettings(raw = {}) {
     ui: {
       notifications: r.ui?.notifications !== false,
       reducedMotion: !!r.ui?.reducedMotion,
+      sound: r.ui?.sound !== false,
     },
     phone: {
       enabled: r.phone?.enabled === true,
@@ -191,5 +205,7 @@ export function sanitizeSettings(raw = {}) {
       sdkDir: absOrNull(r.android?.sdkDir),
       gradlePath: absOrNull(r.android?.gradlePath),
     },
+    assistant: sanitizeAssistantSettings(r.assistant, ENGINE_IDS),
+    mcp: sanitizeMcpSettings(r.mcp),
   };
 }

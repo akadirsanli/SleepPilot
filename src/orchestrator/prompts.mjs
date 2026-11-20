@@ -267,13 +267,67 @@ DIFF (may be truncated):
 ${patchText || '(no diff available)'}
 
 CHECK RESULTS (executed by SleepPilot):
-${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}`).join('\n') || '- none ran'}
+${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}${c.details?.screenshot ? ` (screenshot of the running app: ${c.details.screenshot} — open it with your file tool if the look matters)` : ''}`).join('\n') || '- none ran'}
 
 Judge whether the change satisfies the acceptance criteria, what is missing, and what evidence is missing.
+${opts.screenshotPages?.length ? `
+SCREENSHOTS (only if you need them): if you cannot judge the result without SEEING it (layout, visual design, a canvas or game screen, mobile view), add "screenshots": [{"page": "index.html", "device": "desktop | phone | tablet"}] (at most 3) to your JSON and use verdict "cannot_judge" for now. SleepPilot opens the pages in a real browser, saves the images and asks you once more. Do not ask when the diff and the checks are enough. Pages in the project: ${opts.screenshotPages.slice(0, 15).join(', ')}.
+` : ''}
 ${opts.scope === 'creative' ? 'Scope mode is CREATIVE: related extra improvements are allowed; still flag anything that breaks requested behaviour.' : 'Scope mode is STRICT: list every change that is not needed for this task or the objective as an issue starting with "OUT-OF-SCOPE:", and use verdict "incomplete" if such changes are significant.'}
 Reply with ONLY a JSON object in a \`\`\`json fenced block:
 \`\`\`json
 {"verdict": "pass | fail | incomplete | cannot_judge", "issues": ["concrete defect or gap"], "missing_verification": ["what was not actually tested"], "summary": "..."}
+\`\`\``;
+}
+
+const STUCK_REASONS = {
+  same_failure: 'the same check failure happened again after a repair attempt',
+  repeated_failure: 'the same failure repeated until the attempt limit; the task was about to be given up',
+  loop: 'the last attempts changed no files although the task is not done (the developer is going in circles)',
+  stalled: 'the developer turn showed no progress for a long time and was stopped (a command that never returned or waited for input?)',
+  timeout: 'the developer turn exceeded the per-turn time limit and was stopped',
+};
+
+/** A different engine diagnoses a stuck task (read-only) and tells the developer how to get unstuck. */
+export function secondOpinionPrompt({ objective, task, reason, attempts = [], lastChecks = [], developerSummary = '', changedFiles = [], fromEngine = '' }) {
+  const fence = '```';
+  return `You are a SECOND-OPINION ENGINEER called in by SleepPilot because a coding agent is stuck. You are read-only: you may read the project files, but never edit them.
+Why you were called: ${STUCK_REASONS[reason] || reason}.${fromEngine ? ` The developer runs on ${fromEngine}; look at the problem with fresh eyes.` : ''}
+
+OBJECTIVE (version ${objective.version}):
+${String(objective.text || '').slice(0, 4000)}
+
+TASK [${task.id}]: ${task.title}
+${String(task.description || '').slice(0, 3000)}
+Acceptance criteria:
+${(task.acceptance || []).map((a) => `- ${a}`).join('\n') || '- (none)'}
+${task.files?.length ? `Files in scope: ${task.files.join(', ')}\n` : ''}
+ATTEMPTS SO FAR (newest last):
+${attempts.slice(-6).map((a) => `- #${a.n}: ${String(a.summary || '').slice(0, 400)}${a.failedChecks ? `\n  failed checks: ${String(a.failedChecks).slice(-1200)}` : ''}${a.reviewIssues ? `\n  reviewer: ${String(a.reviewIssues).slice(0, 400)}` : ''}`).join('\n') || '- (none recorded)'}
+
+LAST CHECK RESULTS:
+${lastChecks.map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' && c.output ? ` — ${String(c.output).slice(-1500)}` : ''}`).join('\n') || '- none'}
+
+LAST DEVELOPER REPORT (a claim, not evidence):
+${String(developerSummary || '(none)').slice(-2500)}
+${changedFiles.length ? `\nFiles changed in the last attempt: ${changedFiles.slice(0, 40).join(', ')}\n` : ''}
+Read the relevant files, then find the ROOT CAUSE: a wrong approach, a misunderstood requirement, an environment problem (missing tool, wrong path, a command that waits for input), a check that cannot pass as written, or a task that is too big for one step.
+Reply with ONLY a JSON object in a ${fence}json fenced block:
+${fence}json
+{"diagnosis": "what is really going wrong (concrete: file, line, command, error)", "root_cause": "approach | requirement | environment | check | too_big | other", "advice": "exact instructions for the developer's next attempt: what to change, in which files, what to avoid", "recommendation": "retry | split | give_up", "subtasks": [{"title": "...", "description": "...", "acceptance": ["..."]}], "give_up_reason": "only for give_up: why no further attempt can succeed"}
+${fence}
+Use "split" (with 2-4 subtasks) only when the task is too big; "give_up" only when the task cannot succeed in this environment.`;
+}
+
+/** Second reviewer turn after SleepPilot took the screenshots the reviewer asked for. */
+export function reviewScreenshotsPrompt({ files = [], missing = [] }) {
+  return `SleepPilot took the screenshots you asked for (real browser, after the page settled):
+${files.map((f) => `- ${f.path} — ${f.page} (${f.device})${f.problems?.length ? ` · page errors while loading: ${f.problems.map((p) => p.text).join('; ').slice(0, 300)}` : ''}`).join('\n') || '- none could be taken'}
+${missing.length ? `Not captured: ${missing.map((m) => `${m.page} (${m.error})`).join('; ')}\n` : ''}
+Open each image with your file-reading tool and look at it. Then give your FINAL verdict for the same task, judged on the diff, the checks AND what the screenshots show. Do not ask for more screenshots.
+Reply with ONLY a JSON object in a \`\`\`json fenced block:
+\`\`\`json
+{"verdict": "pass | fail | incomplete | cannot_judge", "issues": ["concrete defect or gap, mention what the screenshot shows"], "missing_verification": ["..."], "summary": "..."}
 \`\`\``;
 }
 

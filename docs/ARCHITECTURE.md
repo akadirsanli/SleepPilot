@@ -206,6 +206,15 @@ JSON is written atomically (temp file + rename, retries for Windows locks). Pers
 - `src/android/service.mjs` — per-project builds (one at a time, streamed to the UI), signing keys (keystore in `android-keys/`, password in the credential store), devices.
 - The `android-build` check type (`src/checks/runner.mjs`) runs the same build after a task; a missing toolchain is an environment error, not a failed task.
 
+## Assistant, second opinion, MCP
+
+- `src/assistant/assistant.mjs` — status cards computed from state (no model), the prompt (guide + live state + screen text, redacted), and the model fallback chain (up to three `{ engine, model }` choices, read-only turns, 3-minute timeout, streamed with SSE `assistant` events). History in `<data>/assistant/history.json`. UI: `ui/assistant.js`.
+- Second opinion (`RunController.stuckReason / secondOpinion / applySecondOpinion`): triggers on a repeated failure signature, an imminent `repeated_failure` block, two no-change attempts, or a stall/timeout. The consultant route prefers a connected read-only engine other than the developer's; the turn runs with the reviewer's read-only rules but is billed as `second_opinion`. Results: advice in `task.recoveryNote`, a split into sub-tasks, or a block with reason `second_opinion`.
+- Reviewer screenshots: the review prompt offers `"screenshots"` only when a browser exists and the project has HTML pages; `captureScreenshots()` (`src/checks/html-smoke.mjs`) writes PNGs to `.sleeppilot/screens/`, then one follow-up reviewer turn gives the final verdict.
+- `src/mcp/mcp.mjs` — one MCP list → Claude Code `--mcp-config` (+ `--allowedTools mcp__<name>`), Codex `-c mcp_servers.*`, OpenCode `OPENCODE_CONFIG_CONTENT`. External CLI engines add the arguments in `mcpArgs()`.
+- `src/android/run.mjs` — the `android-run` check: device choice (phone, running emulator, or a headless AVD it starts), install, launch, crash detection from logcat, a binary-safe `screencap`.
+- `ui/dom.js` — `morph()` updates the DOM in place (keyed by `data-key`/`id`, keeps open `<details>` and focused inputs), used by the Run screen and the chat so live updates do not rebuild elements.
+
 ## Reverse & Rust
 
 `src/reverse/`:

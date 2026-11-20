@@ -3,6 +3,8 @@
 // Data: finished turns from /api/runs/:pid/:rid/turns, live updates from the log stream (entries
 // carry the turn id). app.js imports this module and hands over its helpers with initChat().
 
+import { morph, morphElement } from './dom.js';
+
 let S, api, esc, fmtClock, fmtDur, fmtTime, num, markdown, TURN;
 export function initChat(deps) {
   ({ S, api, esc, fmtClock, fmtDur, fmtTime, num, markdown, TURN } = deps);
@@ -154,13 +156,13 @@ export function chatSchedule(turnId) {
     if (!box) return;
     if (ids.includes('*') || ids.some((id) => !document.getElementById(`turn-${id}`))) return chatRender();
     const stick = chatAtBottom(box);
+    // Only the changed parts of each bubble are updated: no re-created elements, no replayed
+    // entrance animation, folds stay as the user left them.
     for (const id of ids) {
       const t = CHAT.turns.get(id);
       const el = document.getElementById(`turn-${id}`);
       if (!t || !el) continue;
-      const open = chatOpenState(el);
-      el.outerHTML = chatTurnHtml(t);
-      chatRestoreOpen(document.getElementById(`turn-${id}`), open);
+      morphElement(el, chatTurnHtml(t));
     }
     if (stick) box.scrollTop = box.scrollHeight;
   }, 80);
@@ -168,18 +170,6 @@ export function chatSchedule(turnId) {
 
 function chatAtBottom(box) {
   return document.getElementById('chatAutoScroll')?.checked !== false && box.scrollHeight - box.scrollTop - box.clientHeight < 160;
-}
-
-// Keep folds the user opened/closed while the bubble re-renders.
-function chatOpenState(el) {
-  return [...el.querySelectorAll('details[data-k]')].map((d) => [d.dataset.k, d.open]);
-}
-function chatRestoreOpen(el, state) {
-  if (!el) return;
-  for (const [k, open] of state) {
-    const d = el.querySelector(`details[data-k="${CSS.escape(k)}"]`);
-    if (d) d.open = open;
-  }
 }
 
 function chatTimeline() {
@@ -197,18 +187,21 @@ export function chatRender() {
   const box = document.getElementById('chat');
   if (!box) return;
   const stick = chatAtBottom(box) || !box.innerHTML;
-  const opens = new Map([...box.querySelectorAll('.turn')].map((el) => [el.id, chatOpenState(el)]));
   const items = chatTimeline();
-  box.innerHTML = items.length
-    ? items.map((x) => (x.turn ? chatTurnHtml(x.turn) : chatSysHtml(x.sys))).join('')
-    : '<div class="empty">No agent turns yet. Once the run starts, the manager, developer and reviewer conversations appear here.</div>';
-  for (const [id, st] of opens) chatRestoreOpen(document.getElementById(id), st);
+  // Keyed update: existing bubbles and timeline lines stay in place; only new ones are inserted
+  // (and only they play the entrance animation).
+  morph(
+    box,
+    items.length
+      ? items.map((x) => (x.turn ? chatTurnHtml(x.turn) : chatSysHtml(x.sys))).join('')
+      : '<div class="empty" data-key="empty">No agent turns yet. Once the run starts, the manager, developer and reviewer conversations appear here.</div>',
+  );
   if (stick) box.scrollTop = box.scrollHeight;
 }
 
 function chatSysHtml(e) {
   const cls = /fail|error/.test(e.kind) ? ' bad' : e.kind === 'check-pass' ? ' ok' : e.kind === 'iteration' ? ' strong' : '';
-  return `<div class="chat-sys${cls}"><span class="t">${fmtClock(e.at)}</span> ${CHAT_SYS[e.kind]} ${esc(e.text)}</div>`;
+  return `<div class="chat-sys${cls}" data-key="s-${esc(e.at)}-${esc(e.kind)}-${esc(String(e.text || '').length)}"><span class="t">${fmtClock(e.at)}</span> ${CHAT_SYS[e.kind]} ${esc(e.text)}</div>`;
 }
 
 export function chatTurnHtml(t) {
@@ -233,8 +226,41 @@ export function chatTurnHtml(t) {
     ${status}
   </div>`;
   const prompt = t.prompt ? `<details class="chat-prompt" data-k="p"><summary>Instruction sent</summary><pre>${esc(t.prompt)}</pre></details>` : '';
-  const body = t.items.map((i, n) => chatItemHtml(i, n, t)).join('');
+  const body = chatItemsHtml(t);
   return `<div class="turn role-${esc(t.role)}${t.live ? ' live' : ''}" id="turn-${esc(t.id)}">${head}${prompt}${body || (t.live ? '<div class="chat-wait">The agent is thinking…</div>' : '')}</div>`;
+}
+
+/**
+ * Three or more tool calls in a row are folded into one line ("🔧 6 tool calls · Read ×4, Edit ×2"),
+ * so a busy developer turn reads as what it did, not as a wall of tool rows. While the turn is
+ * running, the line shows the tool that is running now.
+ */
+function chatItemsHtml(t) {
+  const out = [];
+  const items = t.items;
+  for (let n = 0; n < items.length; ) {
+    if (items[n].type !== 'tool') {
+      out.push(chatItemHtml(items[n], n, t));
+      n++;
+      continue;
+    }
+    let end = n;
+    while (end < items.length && items[end].type === 'tool') end++;
+    const group = items.slice(n, end);
+    if (group.length < 3) {
+      group.forEach((i, k) => out.push(chatItemHtml(i, n + k, t)));
+    } else {
+      const counts = new Map();
+      for (const i of group) counts.set(i.name || 'tool', (counts.get(i.name || 'tool') || 0) + 1);
+      const kinds = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, c]) => `${esc(k)}${c > 1 ? ` ×${c}` : ''}`).join(', ');
+      const failed = group.filter((i) => i.status === 'error').length;
+      const running = group.find((i) => i.status === 'running');
+      const now = running ? ` · <span class="chat-live">⏳ ${esc(running.name || 'tool')}</span> <span class="mono">${esc(toolArgText(running.input))}</span>` : '';
+      out.push(`<details class="chat-tools${failed ? ' bad' : ''}" data-k="g${n}"><summary>🔧 <b>${group.length} tool calls</b> <span class="hint">${kinds}</span>${failed ? ` <span class="tool-bad">${failed} failed</span>` : ''}${now}</summary><div class="chat-tools-body">${group.map((i, k) => chatItemHtml(i, n + k, t)).join('')}</div></details>`);
+    }
+    n = end;
+  }
+  return out.join('');
 }
 
 function chatItemHtml(i, n, t) {

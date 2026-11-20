@@ -31,7 +31,10 @@ import { initWorkspace, newProjectDir, projectFolderName, validateWorkspaceDir, 
 import { PreviewManager, detectPreview, effectivePreview, sanitizePreviewConfig } from '../preview/preview.mjs';
 import { AndroidService } from '../android/service.mjs';
 import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
+import { stopStartedEmulators } from '../android/run.mjs';
 import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
+import { Assistant, buildStatus, stateText } from '../assistant/assistant.mjs';
+import { MCP_PRESETS, MCP_ENGINES } from '../mcp/mcp.mjs';
 import { logger } from '../util/log.mjs';
 
 const log = logger('app');
@@ -61,6 +64,7 @@ export class SleepPilotApp extends EventEmitter {
     this.keepAwake = new KeepAwake();
     this.previews = new PreviewManager();
     this.android = new AndroidService({ credentials: this.credentials, exportDirFor: (p) => this.exportDirFor(p) });
+    this.assistant = new Assistant({ manager: this.manager, getSettings: () => this.settings });
   }
 
   /** The engine of the default (most recently selected) backend. Kept for compatibility. */
@@ -78,6 +82,8 @@ export class SleepPilotApp extends EventEmitter {
     this.previews.on('update', (u) => this.emit('broadcast', { type: 'preview', data: u }));
     this.android.on('update', (u) => this.emit('broadcast', { type: 'android-build', data: u }));
     this.android.on('toolchain', (u) => this.emit('broadcast', { type: 'android-toolchain', data: u }));
+    this.assistant.on('delta', (d) => this.emit('broadcast', { type: 'assistant', data: { ...d, kind: 'delta' } }));
+    this.assistant.on('progress', (d) => this.emit('broadcast', { type: 'assistant', data: { ...d, kind: 'progress' } }));
     this.manager.on('status', () => this.emit('broadcast', { type: 'engines', data: this.enginesView() }));
     this.manager.on('stream', (s) => this.emit('broadcast', { type: 'stream', data: s }));
     if (this.recover) await this.recoverRuns();
@@ -258,7 +264,7 @@ export class SleepPilotApp extends EventEmitter {
     const activeList = this.activeControllers();
     const active = activeList[0] || null;
     return {
-      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.5.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.6.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
       workspace: { dir: this.settings.workspace?.dir || null, configured: !!this.settings.workspace?.dir },
       templates: Object.values(PROJECT_TEMPLATES).map((t) => ({ id: t.id, label: t.label, android: t.android })),
       previews: this.previews.running().map((p) => ({ projectId: p.projectId, url: p.url, mode: p.mode, state: p.state })),
@@ -295,11 +301,17 @@ export class SleepPilotApp extends EventEmitter {
       }
     }
     const merged = { ...this.settings, ...patch, providers: patch.providers ?? this.settings.providers };
+    const mcpBefore = JSON.stringify(this.settings?.mcp || {});
     this.settings = sanitizeGlobalSettings(merged);
+    const mcpChanged = mcpBefore !== JSON.stringify(this.settings.mcp);
     this.toolsCache = null;
     await this.store.saveSettings(this.settings);
     this.manager.applySettings(this.settings);
     configureAndroid(this.settings.android);
+    // OpenCode reads its MCP servers at start: restart it when they change and nothing is running.
+    if (mcpChanged && this.manager.get('opencode')?.connected && !this.activeControllers().length) {
+      this.manager.connect('opencode', { force: true }).catch((err) => log.warn(`OpenCode restart for MCP failed: ${err.message}`));
+    }
     this.emit('broadcast', { type: 'engines', data: this.enginesView() });
     return this.settings;
   }
@@ -470,6 +482,69 @@ export class SleepPilotApp extends EventEmitter {
     await this.previews.start(project, plan).catch((err) => log.info(`preview not started: ${err.message}`));
   }
 
+  // ------------------------------------------------------------------ MCP servers
+
+  mcpView() {
+    return { servers: this.settings.mcp?.servers || [], presets: MCP_PRESETS, envSet: this.credentials.envNames().concat(Object.keys(process.env)).filter((n, i, a) => a.indexOf(n) === i && (this.settings.mcp?.servers || []).some((s) => s.env.includes(n))), engines: MCP_ENGINES };
+  }
+
+  async saveMcp({ servers } = {}) {
+    await this.saveSettings({ mcp: { servers: Array.isArray(servers) ? servers : [] } });
+    return this.mcpView();
+  }
+
+  // ------------------------------------------------------------------ assistant (chat box)
+
+  /** Project, run (live view or stored) and its recent events for the assistant's context. */
+  async assistantContext({ projectId = null, runId = null } = {}) {
+    const project = projectId ? await this.store.getProject(projectId).catch(() => null) : null;
+    let run = null;
+    let events = [];
+    const id = runId || project?.lastRunId || null;
+    if (project && id) {
+      const c = this.controllers.get(id);
+      run = c ? c.view() : await this.store.getRun(project.id, id).catch(() => null);
+      events = c?.logBuffer?.length ? c.logBuffer.slice(-200) : await this.store.readEvents(project.id, id, 200).catch(() => []);
+    }
+    const state = await this.state();
+    const workspace = { configured: !!this.settings.workspace?.dir };
+    let androidToolchain = null;
+    if (project?.kind === 'android') {
+      const { summarizeToolchain } = await import('../android/service.mjs');
+      androidToolchain = summarizeToolchain(await this.android.toolchain().catch(() => null));
+    }
+    const status = buildStatus({ state, project, run, androidToolchain, workspace });
+    return { state, project, run, events, status, preview: project ? this.previews.view(project.id) : null };
+  }
+
+  async assistantView({ projectId = null, runId = null } = {}) {
+    const ctx = await this.assistantContext({ projectId, runId });
+    const history = await this.assistant.loadHistory();
+    const engines = this.enginesView().engines.map((e) => ({ id: e.id, label: e.label, state: e.status?.state || 'disconnected', models: (e.models || []).slice(0, 200).map((m) => (e.id === 'opencode' || e.id === 'api' ? `${m.providerID}/${m.id}` : m.id)) }));
+    return { settings: this.settings.assistant, candidates: this.assistant.candidates(), engines, status: ctx.status, history: history.slice(-40), busy: !!this.assistant.busy };
+  }
+
+  async assistantAsk({ question, projectId = null, runId = null, view = null, screen = null, id } = {}) {
+    const ctx = await this.assistantContext({ projectId, runId });
+    const live = stateText(ctx);
+    const scr = screen ? { view: String(view || ''), text: String(screen).slice(0, 20_000) } : null;
+    try {
+      return await this.assistant.ask({ id, question, live, screen: scr, directory: ctx.project?.dir || null });
+    } catch (err) {
+      return { id, answer: null, error: err.message, attempts: err.attempts || [] };
+    }
+  }
+
+  async saveAssistantSettings(patch = {}) {
+    await this.saveSettings({ assistant: { ...(this.settings.assistant || {}), ...patch } });
+    return this.assistantView();
+  }
+
+  async clearAssistant() {
+    await this.assistant.clear();
+    return { ok: true };
+  }
+
   // ------------------------------------------------------------------ android
 
   async requireProject(projectId) {
@@ -519,17 +594,25 @@ export class SleepPilotApp extends EventEmitter {
     return this.android.startGradleDownload(opts);
   }
 
-  /** The "Android build" check for a project that does not have one yet. */
-  async androidAddCheck(projectId) {
+  /**
+   * The "Android build" check for a project that does not have one yet; with { run: true } also
+   * the "Android run" check (start the app on a device/emulator after each build).
+   */
+  async androidAddCheck(projectId, { run = false } = {}) {
     const project = await this.requireProject(projectId);
     const info = await this.android.project(project);
     if (!info.info.appModule) throw new Error('No Android application module was found in this project.');
-    if (!(project.checks || []).some((c) => c.type === 'android-build')) {
-      const module = info.info.appModule.name;
-      project.checks = sanitizeChecks([...(project.checks || []), { id: 'android-build', type: 'android-build', name: `Android build (${module ? `:${module}:` : ''}assembleDebug)`, module, variant: 'debug', enabled: true, approved: true, timeoutSec: 2400 }]);
-      if (!project.kind || project.kind === 'code') project.kind = 'android';
-      await this.store.saveProject(project);
+    const module = info.info.appModule.name;
+    let list = [...(project.checks || [])];
+    if (!list.some((c) => c.type === 'android-build')) list.push({ id: 'android-build', type: 'android-build', name: `Android build (${module ? `:${module}:` : ''}assembleDebug)`, module, variant: 'debug', enabled: true, approved: true, timeoutSec: 2400 });
+    if (run && !list.some((c) => c.type === 'android-run')) {
+      // After the build check: it starts the APK that check produced.
+      const at = list.findIndex((c) => c.type === 'android-build');
+      list.splice(at + 1, 0, { id: 'android-run', type: 'android-run', name: 'Android run (start the app on a device, no crash)', module, enabled: true, approved: true, settleSec: 8, timeoutSec: 900 });
     }
+    project.checks = sanitizeChecks(list);
+    if (!project.kind || project.kind === 'code') project.kind = 'android';
+    await this.store.saveProject(project);
     return project.checks;
   }
 
@@ -938,6 +1021,7 @@ export class SleepPilotApp extends EventEmitter {
     this.keepAwake.set(false);
     await this.previews.stopAll().catch(() => {});
     await this.android.cancelAll().catch(() => {});
+    stopStartedEmulators();
     for (const t of this.recoveryTimers || []) clearTimeout(t);
     // A clean shutdown is the user's decision: the next start must not continue the run by itself.
     for (const c of this.controllers.values()) {
@@ -981,6 +1065,7 @@ export function sanitizeSettings(s) {
     improvementMode: !!s.improvementMode,
     autoResumeOnQuotaReset: !!s.autoResumeOnQuotaReset,
     reviewerEnabled: s.reviewerEnabled !== false,
+    secondOpinion: s.secondOpinion !== false,
     sessionPolicy: ['fresh-per-task', 'fresh-per-iteration'].includes(s.sessionPolicy) ? s.sessionPolicy : 'fresh-per-task',
     permissionProfile: normalizeProfile(s.permissionProfile),
     backupBeforeRun: s.backupBeforeRun !== false,
@@ -1043,14 +1128,18 @@ function decorateScout(scout, { scope = null, allTools = null, kind = scout.kind
 export function sanitizeChecks(list) {
   return (Array.isArray(list) ? list : []).slice(0, 30).map((c, i) => ({
     id: String(c.id || `custom-${i + 1}`).slice(0, 60),
-    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build'].includes(c.type) ? c.type : 'command',
+    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build', 'android-run'].includes(c.type) ? c.type : 'command',
     name: String(c.name || c.command || c.cargo || 'Check').slice(0, 120),
     command: c.type === 'command' || !c.type ? String(c.command || '').slice(0, 1000) : undefined,
     cargo: c.type === 'cargo' ? ['check', 'test', 'build', 'clippy', 'fmt'].includes(String(c.cargo || '').split(/\s+/)[0]) ? String(c.cargo).slice(0, 100) : 'check' : undefined,
     entries: Array.isArray(c.entries) ? c.entries.map(String).slice(0, 10) : undefined,
     minBytes: c.type === 'doc-check' ? num(c.minBytes, { min: 0, max: 10_000_000, allowNull: false }) ?? 300 : undefined,
     interpreter: c.type === 'py-syntax' && c.interpreter ? String(c.interpreter).slice(0, 400) : undefined,
-    module: c.type === 'android-build' && c.module != null ? String(c.module).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    module: (c.type === 'android-build' || c.type === 'android-run') && c.module != null ? String(c.module).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    device: c.type === 'android-run' && c.device ? String(c.device).replace(/[^\w:.-]/g, '').slice(0, 80) : undefined,
+    avd: c.type === 'android-run' && c.avd ? String(c.avd).replace(/[^\w.-]/g, '').slice(0, 80) : undefined,
+    settleSec: c.type === 'android-run' ? num(c.settleSec, { min: 2, max: 120, allowNull: false }) ?? 8 : undefined,
+    startEmulator: c.type === 'android-run' ? c.startEmulator !== false : undefined,
     variant: c.type === 'android-build' ? (c.variant === 'release' ? 'release' : 'debug') : undefined,
     enabled: !!c.enabled,
     approved: c.type === 'command' || !c.type ? !!c.approved : true,

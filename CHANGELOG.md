@@ -1,9 +1,55 @@
 # Changelog
 
-## Unreleased
+## 2.6.0 — assistant, second opinion, MCP and Android run check
 
 ### Added
 
+- **Assistant (💬, lower-right corner).** Status cards that need no model call
+  (engine not connected or signed out, paused or failed run and why, blocked
+  tasks, missing goal/checks/workspace/Android tools — each with a button to the
+  right screen) and a chat that answers questions about the app, the project and
+  the run. It sees the live state and the text of the current screen. Choose a
+  preferred model and two alternatives with ⚙ (saved); when one is not available
+  the next answers. Read-only: it explains, it never changes anything.
+- **Second opinion when stuck.** When a task fails the same way twice, is about to
+  be blocked, changes nothing twice in a row, or stalls/times out, another engine
+  (read-only) diagnoses it. Its advice opens the developer's next prompt; it can
+  also split a too-big task or give up on one that cannot succeed here. At most two
+  per task; on by default (Project → Advanced); billed as "Second opinion".
+- **Reviewer screenshots on request.** The reviewer can ask to see up to three
+  pages (desktop, phone or tablet size); SleepPilot takes them in a real browser
+  and the reviewer judges with the images. Nothing is captured otherwise.
+- **MCP servers for the agents** (Settings → MCP): Playwright, Context7 or any
+  server, for Claude Code, Codex and OpenCode; developer-only or all roles; tokens
+  are kept in the credential file.
+- **Android run check.** After the build the app is installed and started on a USB
+  phone or a headless emulator; a crash (with its stack trace) fails the task, and
+  one screenshot is kept for the reviewer.
+- **Sound** when a run finishes, fails or needs you (Settings → App, with a test
+  button), and an option to hide the assistant button.
+
+### Changed
+
+- **The Run screen no longer flashes.** Live updates change only what differs
+  instead of rebuilding the conversation, task list and status bar several times a
+  second (measured: 30 entrance animations in 12 s for 3 messages → 5). Three or
+  more tool calls in a row fold into one line. "Reduce motion" is respected.
+- Notifications stack in the top-right corner instead of replacing each other.
+
+### Fixed
+
+- A closed panel with the hidden attribute could still cover the lower-right
+  corner and block clicks there; the hidden attribute now always wins.
+- The headless browser (HTML checks, screenshots) also starts when SleepPilot runs
+  as root (Linux containers).
+
+## 2.5.0 — workspace, live preview, Android APKs and phone access
+
+### Added
+
+- **Phone access is one click away.** A 📱 button in the top bar (and on the Home
+  screen) shows whether phone access is on and opens its QR code; before, it was
+  only reachable as the last-but-one tab of Settings.
 - **Workspace.** Settings → Workspace (or the Home card) chooses one folder for all
   projects. SleepPilot keeps `projects/<name>/` and `exports/<name>/` inside it; a
   new project then needs only a name, and folder names are made safe for build

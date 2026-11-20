@@ -7,6 +7,11 @@ import { isGeneratedPath } from '../project/generated.mjs';
 import { gitInfo } from '../project/git.mjs';
 import { createBackup } from '../project/backup.mjs';
 import { runChecks, verificationFrom } from '../checks/runner.mjs';
+import { captureScreenshots } from '../checks/html-smoke.mjs';
+import { findBrowsers } from '../checks/browser.mjs';
+import { detectPreview } from '../preview/preview.mjs';
+import fsp from 'node:fs/promises';
+import nodePath from 'node:path';
 import { reconcileTurn } from '../opencode/adapter.mjs';
 import { classifyError } from '../opencode/errors.mjs';
 import { newMessageId, sha1 } from '../util/ids.mjs';
@@ -67,8 +72,8 @@ export function stallLimitMs(limits = {}) {
 const WATCHDOG_MS = Number(process.env.SLEEPPILOT_WATCHDOG_MS || 15_000);
 const OPEN_STATUSES = new Set(['pending', 'test_failed', 'in_progress', 'waiting_user']);
 /** Run limits that may be changed while a run is going (see applyLiveSettings). */
-export const LIVE_LIMIT_KEYS = ['maxTurnMin', 'overtimeMin', 'overtimeMaxRounds', 'parallelDevelopers', 'durationMin', 'maxIterations', 'maxAttemptsSameFailure', 'maxTokens', 'maxCostUsd', 'improvementMode', 'autoResumeOnQuotaReset', 'reviewerEnabled', 'permissionProfile', 'unattended', 'permissionTimeoutMin', 'scopeMode', 'closingReport', 'language', 'finalGraceMin', 'protectedPaths'];
-const LIVE_LABELS = { maxTurnMin: 'Per-turn time limit (min)', overtimeMin: 'Overtime (min)', overtimeMaxRounds: 'Overtime rounds', parallelDevelopers: 'Parallel developers', durationMin: 'Duration (min)', maxIterations: 'Max iterations', maxAttemptsSameFailure: 'Same-failure attempts', maxTokens: 'Token limit', maxCostUsd: 'Cost limit', improvementMode: 'Improvement mode', autoResumeOnQuotaReset: 'Auto-resume after quota reset', reviewerEnabled: 'Reviewer', permissionProfile: 'Permission profile', unattended: 'Unattended', permissionTimeoutMin: 'Permission timeout', scopeMode: 'Scope', closingReport: 'Closing report', language: 'Report language', finalGraceMin: 'Final answer wait', protectedPaths: 'Protected paths' };
+export const LIVE_LIMIT_KEYS = ['secondOpinion', 'maxTurnMin', 'overtimeMin', 'overtimeMaxRounds', 'parallelDevelopers', 'durationMin', 'maxIterations', 'maxAttemptsSameFailure', 'maxTokens', 'maxCostUsd', 'improvementMode', 'autoResumeOnQuotaReset', 'reviewerEnabled', 'permissionProfile', 'unattended', 'permissionTimeoutMin', 'scopeMode', 'closingReport', 'language', 'finalGraceMin', 'protectedPaths'];
+const LIVE_LABELS = { secondOpinion: 'Second opinion', maxTurnMin: 'Per-turn time limit (min)', overtimeMin: 'Overtime (min)', overtimeMaxRounds: 'Overtime rounds', parallelDevelopers: 'Parallel developers', durationMin: 'Duration (min)', maxIterations: 'Max iterations', maxAttemptsSameFailure: 'Same-failure attempts', maxTokens: 'Token limit', maxCostUsd: 'Cost limit', improvementMode: 'Improvement mode', autoResumeOnQuotaReset: 'Auto-resume after quota reset', reviewerEnabled: 'Reviewer', permissionProfile: 'Permission profile', unattended: 'Unattended', permissionTimeoutMin: 'Permission timeout', scopeMode: 'Scope', closingReport: 'Closing report', language: 'Report language', finalGraceMin: 'Final answer wait', protectedPaths: 'Protected paths' };
 const fmtSetting = (v) => (v === null || v === undefined || v === '' ? 'none/unlimited' : v === true ? 'on' : v === false ? 'off' : Array.isArray(v) ? `${v.length} item(s)` : String(v));
 
 class ProviderFailure extends Error {
@@ -108,6 +113,7 @@ export function newRunRecord({ id, project, previousRun = null }) {
       improvementMode: s.improvementMode,
       autoResumeOnQuotaReset: s.autoResumeOnQuotaReset,
       reviewerEnabled: s.reviewerEnabled,
+      secondOpinion: s.secondOpinion !== false,
       sessionPolicy: s.sessionPolicy,
       permissionProfile: s.permissionProfile,
       models: s.models,
@@ -1137,6 +1143,163 @@ export class RunController extends EventEmitter {
   }
 
   /** Options every role prompt receives: scope discipline, sleep mode, report language. */
+  /**
+   * Why a task looks stuck after this evaluation, or null. At most two second opinions per task,
+   * and never twice for the same failure.
+   */
+  stuckReason(task, evaluation, changes) {
+    const changed = changes ? changes.added.length + changes.modified.length + changes.deleted.length : 1;
+    task.noChangeStreak = changed ? 0 : (task.noChangeStreak || 0) + 1;
+    if (this.run.limits.secondOpinion === false || (task.consults || 0) >= 2) return null;
+    const sig = task.failureSignatures?.at(-1) || null;
+    const consulted = (task.consultedSigs || []).includes(sig);
+    if (evaluation.status === 'blocked' && task.blockedReason === 'repeated_failure' && !task.rescued) return 'repeated_failure';
+    if (evaluation.status === 'test_failed' && sig && !consulted && task.failureSignatures.filter((s) => s === sig).length >= 2) return 'same_failure';
+    if (task.noChangeStreak >= 2 && ['pending', 'test_failed', 'implemented_unverified'].includes(evaluation.status)) return 'loop';
+    return null;
+  }
+
+  /** A read-only engine other than the developer's when one is connected; else a fresh reviewer session. */
+  consultantRoute(devHarness) {
+    const usable = (h) => h && this.readOnlyCapable(h) && this.quota.canUse(h).ok;
+    try {
+      for (const r of this.routesFor('reviewer', 'review')) if (r.harness !== devHarness && usable(r.harness)) return { ...r, fresh: true };
+    } catch {}
+    for (const e of this.engineManager?.engines?.values() || []) {
+      if (e.connected && e.id !== devHarness && usable(e.id)) return { harness: e.id, modelProfile: null, model: null, effort: null, fallbackStep: 0, fresh: true };
+    }
+    try {
+      return { ...this.routeFor('reviewer', 'review'), fresh: false };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Second opinion: another engine (read-only) reads the attempts, checks and files of a stuck
+   * task and says what is really wrong. Its advice goes into the developer's next prompt; it can
+   * also split the task, give one more round to a task that was about to be blocked, or give up
+   * on a task that cannot succeed here. Optional and never fatal: on any error the run goes on.
+   */
+  async secondOpinion(task, reason, n, { iteration = null, developerSummary = '', changedFiles = [], lastChecks = [] } = {}) {
+    const devHarness = task.devHarness || this.adapter?.id || null;
+    const route = this.consultantRoute(devHarness);
+    if (!route) return null;
+    task.consults = (task.consults || 0) + 1;
+    if (task.failureSignatures?.length) (task.consultedSigs ||= []).push(task.failureSignatures.at(-1));
+    const label = this.engineManager?.get?.(route.harness)?.label || route.harness;
+    const why = { same_failure: 'the same failure came back', repeated_failure: 'it was about to be given up', loop: 'the last attempts changed nothing', stalled: 'the developer stalled', timeout: 'the developer ran out of time' }[reason] || reason;
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion on [${task.id}] from ${label}${route.fresh ? '' : ' (same engine, fresh session)'}: ${why}.` });
+    this.setActivity('reviewer', `#${n} · second opinion on [${task.id}] from ${label}…`, { taskId: task.id, iteration: n });
+    try {
+      const { session } = await this.createRoleSession('reviewer', route, { title: `SleepPilot · ${this.project.name} · second opinion · ${task.id}`, task });
+      this.sessionHarness.set(session.id, { ...route, sessionID: session.id });
+      const prompt = P.secondOpinionPrompt({ objective: this.project.objective, task, reason, attempts: task.attemptLog || [], lastChecks, developerSummary, changedFiles, fromEngine: route.fresh ? devHarness : '' });
+      const rt = await this.roleTurn('reviewer', session.id, prompt, { iterationN: n, task, tag: 'second opinion', taskType: 'review', usageRole: 'second_opinion' });
+      const j = extractJson(rt.finalText || rt.allText);
+      if (!j || (!j.diagnosis && !j.advice)) {
+        this.addLog({ kind: 'warning', role: 'reviewer', text: `The second opinion on [${task.id}] could not be read; the run continues without it.` });
+        return null;
+      }
+      const op = {
+        at: Date.now(),
+        iteration: n,
+        reason,
+        engine: route.harness,
+        diagnosis: String(j.diagnosis || '').slice(0, 1500),
+        rootCause: String(j.root_cause || '').split(/[\s|]/)[0].slice(0, 40),
+        advice: String(j.advice || '').slice(0, 2500),
+        recommendation: ['retry', 'split', 'give_up'].includes(String(j.recommendation || '').split(/[\s|]/)[0]) ? String(j.recommendation).split(/[\s|]/)[0] : 'retry',
+      };
+      (task.secondOpinions ||= []).push(op);
+      if (iteration) iteration.secondOpinion = op;
+      this.applySecondOpinion(task, op, j, n);
+      return op;
+    } catch (err) {
+      if (err instanceof Interrupted) return null;
+      this.addLog({ kind: 'warning', role: 'reviewer', text: `Second opinion not available (${label}): ${redact(String(err.message || err)).slice(0, 300)}. The run continues.` });
+      return null;
+    }
+  }
+
+  applySecondOpinion(task, op, j, n) {
+    const head = `Diagnosis: ${op.diagnosis}${op.rootCause ? ` (root cause: ${op.rootCause})` : ''}`;
+    if (op.recommendation === 'split' && Array.isArray(j.subtasks) && j.subtasks.length >= 2 && !['verified', 'cancelled'].includes(task.status)) {
+      const subs = j.subtasks.slice(0, 4).map((s, i) => ({
+        title: String(s.title || `Part ${i + 1} of ${task.title}`),
+        description: `${String(s.description || '')}
+
+Part of the original task [${task.id}] ${task.title}. ${op.advice ? `Advice from the second opinion: ${op.advice}` : ''}`,
+        acceptance: Array.isArray(s.acceptance) ? s.acceptance : [],
+        priority: task.priority,
+        files: task.files,
+        type: task.type,
+        depends_on: i ? [i] : [],
+      }));
+      const added = this.addTasks(subs, { createdBy: 'second-opinion' });
+      if (added.length) {
+        setTaskStatus(task, 'cancelled', `Split into ${added.map((t) => `[${t.id}]`).join(', ')} after a second opinion. ${head}`, n);
+        this.addLog({ kind: 'plan', role: 'reviewer', text: `Second opinion: [${task.id}] is too big; split into ${added.map((t) => `[${t.id}] ${t.title}`).join(', ')}.` });
+        return;
+      }
+    }
+    if (op.recommendation === 'give_up' && j.give_up_reason) {
+      setTaskStatus(task, 'blocked', `Second opinion: this cannot succeed here — ${String(j.give_up_reason).slice(0, 600)}. ${head}`, n);
+      task.blockedReason = 'second_opinion';
+      this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion: [${task.id}] cannot succeed here — ${String(j.give_up_reason).slice(0, 300)}` });
+      return;
+    }
+    task.recoveryNote = `SECOND OPINION (another engine looked at why this task is stuck). ${head}
+Do this now: ${op.advice || 'take a different approach than in the previous attempts.'}`;
+    if (task.status === 'blocked' && task.blockedReason === 'repeated_failure' && !task.rescued) {
+      // One more round with the new advice before giving up for good.
+      task.rescued = true;
+      task.blockedReason = null;
+      task.failureSignatures = [];
+      task.timeouts = 0;
+      setTaskStatus(task, 'pending', `One more attempt with a second opinion. ${head}`, n);
+    }
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Second opinion on [${task.id}]: ${op.diagnosis.slice(0, 300)}${op.advice ? ` → ${op.advice.slice(0, 200)}` : ''}` });
+  }
+
+  /** HTML pages the reviewer may ask to see; empty when no browser is installed (no offer then). */
+  async screenshotPages() {
+    if (this.run.screenshotsUnavailable) return [];
+    if (!findBrowsers().length) {
+      this.run.screenshotsUnavailable = true;
+      return [];
+    }
+    const d = await detectPreview(this.project.dir).catch(() => null);
+    return (d?.htmlFiles || []).slice(0, 20);
+  }
+
+  /**
+   * Take the screenshots the reviewer asked for. They are written to .sleeppilot/screens/ inside
+   * the project (so read-only agents can open them with their file tool); that folder is ignored
+   * by SleepPilot's change tracking and carries its own .gitignore.
+   */
+  async takeReviewScreenshots(wanted, n, task) {
+    const pages = new Set((await this.screenshotPages()).map((p) => p.toLowerCase()));
+    const shots = wanted
+      .slice(0, 3)
+      .map((w) => (typeof w === 'string' ? { page: w } : w || {}))
+      .map((w) => ({ page: String(w.page || '').replace(/\\/g, '/').replace(/^\/+/, ''), device: ['phone', 'tablet', 'desktop'].includes(w.device) ? w.device : 'desktop' }))
+      .filter((w) => w.page && !w.page.includes('..') && pages.has(w.page.split(/[?#]/)[0].toLowerCase()));
+    if (!shots.length) {
+      this.addLog({ kind: 'review', role: 'reviewer', text: 'The reviewer asked for screenshots of pages that do not exist; none taken.' });
+      return null;
+    }
+    const base = nodePath.join(this.project.dir, '.sleeppilot');
+    const outDir = nodePath.join(base, 'screens');
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(nodePath.join(base, '.gitignore'), '# SleepPilot working files (reviewer screenshots). Not part of the project.\n*\n').catch(() => {});
+    this.setActivity('reviewer', `#${n} · taking ${shots.length} screenshot(s) for the reviewer…`, { taskId: task.id, iteration: n });
+    const r = await captureScreenshots({ projectDir: this.project.dir, shots, outDir, prefix: `i${n}-${task.id}`.replace(/[^\w.-]/g, '_') }).catch((err) => ({ files: [], missing: shots.map((s) => ({ page: s.page, error: err.message })) }));
+    const files = (r.files || []).map((f) => ({ ...f, path: nodePath.relative(this.project.dir, f.file).split(nodePath.sep).join('/') }));
+    this.addLog({ kind: 'review', role: 'reviewer', text: `Screenshots for the reviewer: ${files.map((f) => `${f.page} (${f.device})`).join(', ') || 'none'}${r.missing?.length ? ` — not captured: ${r.missing.map((m) => m.page).join(', ')}` : ''}` });
+    return files.length || r.missing?.length ? { files, missing: r.missing || [] } : null;
+  }
+
   promptOpts() {
     const l = this.run.limits;
     return { scope: l.scopeMode || 'strict', unattended: !!l.unattended, language: l.language || 'en', protectedPaths: l.protectedPaths || [], parallel: l.parallelDevelopers || 1, scout: this.run.scout || null };
@@ -1249,7 +1412,7 @@ export class RunController extends EventEmitter {
   }
 
   /** Run a turn for any role with persistence-before-submit, live streaming and usage accounting. */
-  async roleTurn(role, sessionID, text, { iterationN, tag, task = null, taskType = null, fallbackDepth = 0, attempted = [] } = {}) {
+  async roleTurn(role, sessionID, text, { iterationN, tag, task = null, taskType = null, fallbackDepth = 0, attempted = [], usageRole = null } = {}) {
     const run = this.run;
     const route = this.sessionRoute(sessionID);
     const maxSwitches = Number(this.routing?.maxSwitches) || 8;
@@ -1280,7 +1443,7 @@ export class RunController extends EventEmitter {
       }
       this.quotaSnapshot();
       await this.persist();
-      return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness] });
+      return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness], usageRole });
     }
 
     const adapter = await this.ensureHarness(route.harness);
@@ -1355,7 +1518,8 @@ export class RunController extends EventEmitter {
     // Until this iteration is evaluated (diff, checks, decision) a crash must not lose the finished
     // turn: recovery then evaluates THIS turn from the engine's records instead of re-running the task.
     if (role === 'developer' && iterationN != null) (run.evaluating ||= {})[iterationN] = { ...rec, endedAt: Date.now() };
-    this.addUsage(role, result.usage);
+    // Turns that only borrow a role's session rules (e.g. a second opinion) are billed under their own name.
+    this.addUsage(usageRole || role, result.usage);
     this.addLog({ kind: 'turn-end', role, turn: messageId, status: result.status, text: `${pre}${roleLabel(role)} turn finished on ${route.harness}: ${turnStatusLabel(result.status)}${result.usage ? ` · estimated cost $${result.usage.cost.toFixed(4)} · ${result.usage.tokens.input + result.usage.tokens.output} tokens` : ''}` });
     this.run.pending.permissions = this.run.pending.permissions.filter((p) => p.sessionID !== sessionID);
     this.run.pending.forms = this.run.pending.forms.filter((p) => p.sessionID !== sessionID);
@@ -1379,7 +1543,7 @@ export class RunController extends EventEmitter {
             task.reviewSession = { id: created.session.id, model: `${next.harness}/${next.modelProfile || 'default'}`, harness: next.harness, modelProfile: next.modelProfile };
           }
           await this.persist();
-          return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness] });
+          return this.roleTurn(role, created.session.id, text, { iterationN, tag, task, taskType, fallbackDepth: fallbackDepth + 1, attempted: [...attempted, route.harness], usageRole });
         }
       }
       throw new ProviderFailure(providerErr.classification, role);
@@ -1886,6 +2050,9 @@ export class RunController extends EventEmitter {
         if (task.timeouts >= (run.limits.maxAttemptsSameFailure || 3)) {
           setTaskStatus(task, 'blocked', `The developer turn ${stalled ? 'stalled / showed no progress' : 'exceeded the per-turn time limit'} ${task.timeouts} times; task blocked.`, n);
           task.blockedReason = 'repeated_failure';
+        } else if (run.limits.secondOpinion !== false && (task.consults || 0) < 2 && !this.control?.stop && !this.control?.pause) {
+          // The first hang/timeout already gets a diagnosis: hangs tend to repeat.
+          await this.secondOpinion(task, stalled ? 'stalled' : 'timeout', n, { iteration });
         }
       }
       await this.saveIterationState(iteration);
@@ -1926,8 +2093,19 @@ export class RunController extends EventEmitter {
       this.setActivity('reviewer', `#${n} · the reviewer is assessing…`, { taskId: task.id, iteration: n });
       try {
         const sid = this.waveCheckCache ? await this.reviewSessionFor(task) : await this.ensureSession('reviewer');
-        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: this.promptOpts() }), { iterationN: n, task, taskType: 'review' });
-        const j = extractJson(rt.finalText || rt.allText);
+        const screenshotPages = await this.screenshotPages();
+        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: { ...this.promptOpts(), screenshotPages } }), { iterationN: n, task, taskType: 'review' });
+        let j = extractJson(rt.finalText || rt.allText);
+        // Screenshots only when the reviewer asks for them, at most 3, and one extra turn.
+        const wanted = screenshotPages.length && Array.isArray(j?.screenshots) ? j.screenshots : [];
+        if (wanted.length) {
+          const shots = await this.takeReviewScreenshots(wanted, n, task);
+          if (shots) {
+            iteration.screenshots = shots.files.map((f) => ({ page: f.page, device: f.device, path: f.path }));
+            const rt2 = await this.roleTurn('reviewer', sid, P.reviewScreenshotsPrompt(shots), { iterationN: n, task, taskType: 'review' });
+            j = extractJson(rt2.finalText || rt2.allText) || j;
+          }
+        }
         iteration.review = j
           ? { verdict: String(j.verdict || 'cannot_judge').split(/[\s|]/)[0], issues: (j.issues || []).map(String).slice(0, 12), missingVerification: (j.missing_verification || []).map(String).slice(0, 12), summary: String(j.summary || '').slice(0, 2000), sameModelAsDeveloper: sameModel(run.limits.models) }
           : { verdict: 'cannot_judge', issues: [], missingVerification: [], summary: 'Could not parse the reviewer reply.', sameModelAsDeveloper: sameModel(run.limits.models) };
@@ -1955,6 +2133,10 @@ export class RunController extends EventEmitter {
     iteration.status = 'completed';
     iteration.endedAt = Date.now();
     this.addLog({ kind: 'evaluation', text: `Evaluation #${n}: [${task.id}] → ${evaluation.label}. ${evaluation.note}` });
+    // Stuck (same failure again, about to be given up, or going in circles): another engine
+    // diagnoses it before the next attempt.
+    const stuck = !recovered && !timeUp ? this.stuckReason(task, evaluation, changes) : null;
+    if (stuck) await this.secondOpinion(task, stuck, n, { iteration, developerSummary: turn.finalText, changedFiles, lastChecks: iteration.checks });
     await this.saveIterationState(iteration);
 
     if (recovered || timeUp) return;
@@ -2329,7 +2511,7 @@ function isPlaceholderTask(raw) {
 }
 
 function roleLabel(role) {
-  return { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check' }[role] || role;
+  return { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check', second_opinion: 'Second opinion' }[role] || role;
 }
 
 function lineTotals(patches) {

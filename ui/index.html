@@ -22,6 +22,7 @@
       </span>
     </a>
     <div class="top-status">
+      <button id="phoneBadge" class="status-chip" data-act="openPhoneSettings" title="Control SleepPilot from your phone">📱 Phone</button>
       <button id="engineBadge" class="status-chip" data-act="goSettings" title="Engine status">Engine…</button>
       <span id="runBadge" class="status-chip" hidden></span>
     </div>
@@ -38,7 +39,7 @@
       <button class="nav-btn" data-view="reverse"><span class="nav-icon">◈</span>Reverse &amp; Rust</button>
       <button class="nav-btn" data-view="settings"><span class="nav-icon">⚙</span>Settings</button>
       <div class="sidebar-project" id="sidebarProject"></div>
-      <div class="sidebar-foot">v2.5.0 · your machine, your keys · right-click for menu</div>
+      <div class="sidebar-foot">v2.6.0 · your machine, your keys · right-click for menu</div>
     </nav>
     <main id="main" class="main"></main>
   </div>
@@ -54,7 +55,7 @@
     <div class="sep"></div>
     <button data-act="reloadUi">Reload interface</button>
   </div>
-  <div id="toast" class="toast" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="app.js" type="module"></script>
 </body>
 </html>

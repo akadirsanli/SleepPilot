@@ -69,13 +69,41 @@ export async function runHtmlSmoke(opts) {
   return { status: 'skipped', summary: `The HTML check is unavailable; no browser could be started (${startErrors.join('; ')}).`, pages: [] };
 }
 
-async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 60, settleMs = 2000 }) {
+/** "web/index.html?level=2#start" → URL path with each segment encoded, query/hash kept. */
+export function entryUrl(port, entry) {
+  const s = String(entry || '');
+  const cut = s.search(/[?#]/);
+  const file = cut >= 0 ? s.slice(0, cut) : s;
+  const rest = cut >= 0 ? s.slice(cut) : '';
+  return `http://127.0.0.1:${port}/${file.split('/').map(encodeURIComponent).join('/')}${rest}`;
+}
+
+const VIEWPORTS = { desktop: { width: 1280, height: 800, mobile: false }, phone: { width: 390, height: 844, mobile: true }, tablet: { width: 820, height: 1180, mobile: true } };
+
+/**
+ * Screenshots of project pages for the reviewer (taken only when the reviewer asks for them).
+ * shots: [{ page: 'index.html', device: 'desktop' | 'phone' | 'tablet' }]. Each PNG is written to
+ * outDir; page errors seen while loading are returned with it.
+ */
+export async function captureScreenshots({ projectDir, shots, outDir, prefix = 'shot', timeoutSec = 45, settleMs = 2500 }) {
+  await fsp.mkdir(outDir, { recursive: true });
+  const r = await runHtmlSmoke({ projectDir, entries: shots.map((s) => s.page), timeoutSec, settleMs, screenshot: { outDir, prefix, devices: shots.map((s) => s.device) } });
+  return {
+    status: r.status,
+    summary: r.summary,
+    files: (r.pages || []).filter((p) => p.screenshot).map((p) => ({ page: p.entry, device: p.device, file: p.screenshot, problems: p.problems.slice(0, 5) })),
+    missing: (r.pages || []).filter((p) => !p.screenshot).map((p) => ({ page: p.entry, error: p.screenshotError || p.problems?.[0]?.text || 'no screenshot' })),
+  };
+}
+
+async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 60, settleMs = 2000, screenshot = null }) {
   const server = await staticServer(projectDir);
   const port = server.address().port;
   const profile = await fsp.mkdtemp(path.join(os.tmpdir(), 'sleeppilot-edge-'));
   const browser = spawn(
     browserPath,
-    ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'],
+    // Chrome refuses to run as root without --no-sandbox (Linux containers, CI images).
+    ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'],
     { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
   );
   const pages = [];
@@ -96,8 +124,9 @@ async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 6
     });
     started = true;
     const cdp = await connectCdp(wsUrl);
-    for (const entry of entries) {
-      pages.push(await checkPage(cdp, `http://127.0.0.1:${port}/${entry.split('/').map(encodeURIComponent).join('/')}`, entry, timeoutSec, settleMs));
+    for (const [i, entry] of entries.entries()) {
+      const shot = screenshot ? { file: path.join(screenshot.outDir, `${screenshot.prefix}-${i + 1}.png`), device: screenshot.devices?.[i] || 'desktop' } : null;
+      pages.push(await checkPage(cdp, entryUrl(port, entry), entry, timeoutSec, settleMs, shot));
     }
     cdp.close();
   } catch (err) {
@@ -120,7 +149,7 @@ async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 6
   };
 }
 
-async function checkPage(cdp, url, entry, timeoutSec, settleMs) {
+async function checkPage(cdp, url, entry, timeoutSec, settleMs, shot = null) {
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
   const problems = [];
@@ -145,6 +174,10 @@ async function checkPage(cdp, url, entry, timeoutSec, settleMs) {
   });
   try {
     for (const d of ['Runtime.enable', 'Log.enable', 'Page.enable', 'Network.enable']) await cdp.send(d, {}, sessionId);
+    if (shot) {
+      const vp = VIEWPORTS[shot.device] || VIEWPORTS.desktop;
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: vp.mobile }, sessionId).catch(() => {});
+    }
     const nav = await cdp.send('Page.navigate', { url }, sessionId);
     if (nav.errorText) problems.push({ kind: 'navigation', text: nav.errorText });
     const deadline = Date.now() + timeoutSec * 1000;
@@ -153,7 +186,18 @@ async function checkPage(cdp, url, entry, timeoutSec, settleMs) {
     await new Promise((r) => setTimeout(r, settleMs));
     const title = await cdp.send('Runtime.evaluate', { expression: 'document.title', returnByValue: true }, sessionId).catch(() => null);
     const bodyLen = await cdp.send('Runtime.evaluate', { expression: 'document.body ? document.body.innerText.length : -1', returnByValue: true }, sessionId).catch(() => null);
-    return { entry, url, ok: problems.length === 0, loaded, title: title?.result?.value ?? null, bodyTextLength: bodyLen?.result?.value ?? null, problems: problems.slice(0, 30), console: consoleLines.slice(0, 30) };
+    let screenshot = null;
+    let screenshotError = null;
+    if (shot) {
+      try {
+        const img = await cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId);
+        await fsp.writeFile(shot.file, Buffer.from(img.data, 'base64'));
+        screenshot = shot.file;
+      } catch (err) {
+        screenshotError = err.message;
+      }
+    }
+    return { entry, url, ok: problems.length === 0, loaded, title: title?.result?.value ?? null, bodyTextLength: bodyLen?.result?.value ?? null, problems: problems.slice(0, 30), console: consoleLines.slice(0, 30), ...(shot ? { screenshot, screenshotError, device: shot.device } : {}) };
   } finally {
     off();
     await cdp.send('Target.closeTarget', { targetId }).catch(() => {});

@@ -33,7 +33,7 @@ export class OpenCodeServerProcess extends EventEmitter {
     cleanupOrphan();
     this.password = secret(32);
     registerSecret(this.password);
-    const env = { ...process.env, OPENCODE_PASSWORD: this.password };
+    const env = { ...process.env, ...(this.command.env || {}), OPENCODE_PASSWORD: this.password };
     delete env.OPENCODE_SERVER_PASSWORD;
     const baseArgs = this.command.args ?? ['serve', '--hostname', '127.0.0.1', '--port', '0'];
     const sp = resolveSpawn(this.command.exe, baseArgs);

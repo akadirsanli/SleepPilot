@@ -1,6 +1,8 @@
 // SleepPilot UI — vanilla JS, no build step.
+import { morph } from './dom.js';
+import { initAssistant, assistantRefresh, assistantEvent } from './assistant.js';
 import { initChat, CHAT, chatReset, chatLoad, chatApply, chatTurnFinished, chatSchedule, chatRender, chatPanelHtml } from './chat.js';
-import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange } from './workbench.js';
+import { initWorkbench, WB, WB_ACTIONS, loadWorkspace, workspaceCardHtml, workspaceSettingsHtml, loadPreview, renderPreviewView, onPreviewMessage, onPreviewEvent, loadAndroid, renderAndroidView, onAndroidBuildEvent, onAndroidToolchainEvent, androidSettingsHtml, onTemplateChange, loadMcp, mcpSettingsHtml } from './workbench.js';
 
 const S = {
   state: null,
@@ -106,13 +108,53 @@ async function api(method, path, body) {
   }
 }
 
+/** Stacked notifications: several can be visible; errors stay longer; click to dismiss. */
 function toast(msg, bad = false) {
-  const t = $('#toast');
+  const box = $('#toasts');
+  if (!box) return;
+  // The same message again only restarts its timer instead of stacking duplicates.
+  const same = [...box.children].find((t) => t.dataset.msg === String(msg));
+  const t = same || document.createElement('div');
+  t.className = `toast${bad ? ' bad' : ''}`;
+  t.dataset.msg = String(msg);
   t.textContent = msg;
-  t.className = 'toast' + (bad ? ' bad' : '');
-  t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), bad ? 8000 : 3800);
+  t.title = 'Click to dismiss';
+  const close = () => {
+    t.classList.add('leaving');
+    setTimeout(() => t.remove(), 200);
+  };
+  t.onclick = close;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(close, bad ? 8000 : 3800);
+  if (!same) box.appendChild(t);
+  while (box.children.length > 4) box.firstElementChild.remove();
+}
+
+/**
+ * Short, original chimes made with the Web Audio API (no sound files): finished = rising two
+ * notes, needs you = two equal notes, failed = falling notes. Off under Settings → App.
+ */
+let audioCtx = null;
+function playSound(kind) {
+  if (S.state?.settings?.ui?.sound === false || S.state?.viewer?.phone) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const notes = { done: [659.25, 987.77], attention: [880, 880], failed: [523.25, 349.23] }[kind] || [740];
+    const t0 = audioCtx.currentTime + 0.02;
+    notes.forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const start = t0 + i * 0.18;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.32);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.35);
+    });
+  } catch {}
 }
 
 async function guarded(fn) {
@@ -154,7 +196,7 @@ const TURN = {
   succeeded: 'succeeded', failed: 'failed', interrupted: 'interrupted', running: 'running', lost: 'lost', not_found: 'not found',
   completed: 'completed', provider_error: 'provider error', not_submitted: 'not sent',
 };
-const ROLE = { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check' };
+const ROLE = { manager: 'Manager', developer: 'Developer', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check', second_opinion: 'Second opinion' };
 const runBadge = (state) => badge(...(RUN_STATE[state] || [state, 'badge-muted']));
 const taskBadge = (status) => badge(...(TASK_STATUS[status] || [status, 'badge-muted']));
 
@@ -203,6 +245,19 @@ function renderEngineBadge() {
   b.title = e.status?.message || '';
   b.style.color = st === 'connected' ? 'var(--ok)' : st === 'error' ? 'var(--bad)' : 'var(--warn)';
 }
+/** Phone access is a whole feature behind the 8th Settings tab; the top bar keeps it one click away. */
+function renderPhoneBadge(phone = S.phone) {
+  const b = $('#phoneBadge');
+  if (!b) return;
+  // On the phone itself the button would only lead to "change this on the PC".
+  b.hidden = !!S.state?.viewer?.phone;
+  const enabled = phone ? !!phone.enabled : !!S.state?.settings?.phone?.enabled;
+  const listening = phone ? !!phone.listening : null;
+  b.textContent = enabled ? (listening === false ? '📱 Phone: waiting for Tailscale' : '📱 Phone: on') : '📱 Connect phone';
+  b.title = enabled ? 'Phone access is on. Click to see the QR code.' : 'Control SleepPilot from your phone: scan a QR code (Settings → Phone).';
+  b.style.color = enabled ? (listening === false ? 'var(--warn)' : 'var(--ok)') : '';
+}
+
 function renderRunBadge(run = S.run) {
   const b = $('#runBadge');
   if (!b) return;
@@ -225,6 +280,7 @@ async function loadState() {
   if (S.projectId && !S.state.projects.some((p) => p.id === S.projectId)) S.projectId = null;
   if (!S.projectId && S.state.activeRuns?.length) S.projectId = S.state.activeRuns[0].projectId;
   renderEngineBadge();
+  renderPhoneBadge();
 }
 
 async function loadProject(id = S.projectId, { keepRun = false } = {}) {
@@ -284,6 +340,8 @@ function connectEvents() {
         const c = $('#runControls');
         if (c && S.run) c.innerHTML = runControlsHtml(S.run);
       }
+    } else if (msg.type === 'assistant') {
+      assistantEvent(msg.data);
     } else if (msg.type === 'android-build') {
       onAndroidBuildEvent(msg.data);
     } else if (msg.type === 'android-toolchain') {
@@ -333,6 +391,10 @@ function onRunUpdate(run) {
   }
   renderRunBadge(run);
   notifyRunChange(run);
+  if (run.projectId === S.projectId && lastRunState.get(`a:${run.id}`) !== run.state) {
+    lastRunState.set(`a:${run.id}`, run.state);
+    assistantRefresh();
+  }
   if (S.run?.id === run.id) {
     S.run = run;
     if (S.view === 'run') updateRunView(run);
@@ -345,7 +407,11 @@ function onRunUpdate(run) {
 function notifyRunChange(r) {
   const prev = lastRunState.get(r.id);
   lastRunState.set(r.id, r.state);
-  if (!prev || prev === r.state || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!prev || prev === r.state) return;
+  if (['completed', 'stopped'].includes(r.state)) playSound('done');
+  else if (r.state === 'failed') playSound('failed');
+  else if (r.state === 'waiting_user' || (r.state === 'paused' && r.pause?.code !== 'user_paused')) playSound('attention');
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const tc = r.taskCounts || {};
   const done = `${tc.verified || 0} verified${tc.implemented_unverified ? `, ${tc.implemented_unverified} not verified` : ''}`;
   let body = null;
@@ -404,6 +470,7 @@ function setActiveNav(view) {
 
 function render() {
   setActiveNav(S.view);
+  assistantRefresh();
   const map = { home: renderHome, project: renderProject, run: renderRun, report: renderReportView, insights: renderInsightsView, reverse: renderReverseView, settings: renderSettingsView, preview: () => (S.project ? renderPreviewView() : renderNeedProject()), android: () => (S.project ? renderAndroidView() : renderNeedProject()) };
   (map[S.view] || renderHome)();
 }
@@ -426,6 +493,7 @@ async function renderHome() {
       <div class="row">
         <button class="btn btn-primary" data-act="focusNewProject">Start a project</button>
         <button class="btn" data-act="goReverse">Sleep &amp; Reverse &amp; Rust It</button>
+        ${S.state?.viewer?.phone ? '' : `<button class="btn btn-ghost" data-act="openPhoneSettings">📱 ${S.state?.settings?.phone?.enabled ? 'Phone access' : 'Connect your phone'}</button>`}
         <button class="btn btn-ghost" data-act="goSettings">Configure engines</button>
       </div>
     </div>
@@ -609,6 +677,7 @@ function renderProject() {
       </div>
       <div class="grid grid-3" style="margin-top:8px">
         <label class="check"><input type="checkbox" id="fReviewer" ${s.reviewerEnabled !== false ? 'checked' : ''}> Reviewer enabled</label>
+        <label class="check" title="When a task fails the same way twice, stalls, or loops without changing files, another engine (read-only) diagnoses it and advises the developer."><input type="checkbox" id="fSecondOpinion" ${s.secondOpinion !== false ? 'checked' : ''}> Second opinion when stuck</label>
         <label class="check"><input type="checkbox" id="fClosing" ${s.closingReport !== false ? 'checked' : ''}> Closing report</label>
         <label class="check"><input type="checkbox" id="fBackup" ${s.backupBeforeRun !== false ? 'checked' : ''}> Backup before run</label>
         <label class="check"><input type="checkbox" id="fCarry" ${s.carryOverTasks !== false ? 'checked' : ''}> Carry over open tasks</label>
@@ -774,6 +843,7 @@ function readSetup() {
     permissionProfile: $('#fProfile')?.value || 'balanced',
     unattended: !!$('#fUnattended')?.checked,
     reviewerEnabled: !!$('#fReviewer')?.checked,
+    secondOpinion: !!$('#fSecondOpinion')?.checked,
     closingReport: !!$('#fClosing')?.checked,
     backupBeforeRun: !!$('#fBackup')?.checked,
     carryOverTasks: !!$('#fCarry')?.checked,
@@ -1118,7 +1188,7 @@ function runBodyHtml(r) {
 function taskListHtml(r) {
   if (!r.tasks?.length) return '<div class="empty">The Manager has not written a task list yet.</div>';
   return `<div class="task-list">${r.tasks.map((t) => `
-    <div class="task ${esc(t.status)}">
+    <div class="task ${esc(t.status)}" data-key="task-${esc(t.id)}">
       <div class="task-head">
         <span class="badge badge-muted">${esc(t.id)}</span>
         <span class="task-title">${esc(t.title)}</span>
@@ -1164,25 +1234,16 @@ function detailsHtml(r) {
   ${r.settingChanges?.length ? `<h3>Changed during the run</h3>${r.settingChanges.map((c) => `<div class="hint">after iteration ${c.afterIteration}: ${esc(c.changes.join('; '))}</div>`).join('')}` : ''}`;
 }
 
+// Live updates change only what differs (see ui/dom.js): rebuilding these blocks with innerHTML
+// several times a second replayed every entrance animation — the "flash" on the Run screen.
 function updateRunView(r) {
-  const head = $('#runHead');
-  if (head) head.innerHTML = runHeadHtml(r);
-  const controls = $('#runControls');
-  if (controls) controls.innerHTML = runControlsHtml(r);
-  const pending = $('#runPending');
-  if (pending) pending.innerHTML = pendingHtml(r);
-  const other = $('#otherRuns');
-  if (other) other.innerHTML = otherActiveRunsHtml(r);
-  const activity = $('#runActivity');
-  if (activity) activity.innerHTML = `${r.state === 'running' ? '<span class="live-indicator"><span class="spinner"></span> live</span> ' : ''}${esc(r.activity?.message || '')}`;
-  if (S.runTab === 'tasks') {
-    const list = $('#taskList');
-    if (list) list.innerHTML = taskListHtml(r);
-  }
-  if (S.runTab === 'details') {
-    const body = $('#runBody');
-    if (body) body.innerHTML = detailsHtml(r);
-  }
+  morph($('#runHead'), runHeadHtml(r));
+  morph($('#runControls'), runControlsHtml(r));
+  morph($('#runPending'), pendingHtml(r));
+  morph($('#otherRuns'), otherActiveRunsHtml(r));
+  morph($('#runActivity'), `${r.state === 'running' ? '<span class="live-indicator"><span class="spinner"></span> live</span> ' : ''}${esc(r.activity?.message || '')}`);
+  if (S.runTab === 'tasks') morph($('#taskList'), taskListHtml(r));
+  if (S.runTab === 'details') morph($('#runBody'), detailsHtml(r));
   renderRunBadge(r);
 }
 
@@ -1408,7 +1469,7 @@ async function renderSettings() {
 }
 
 function renderSettingsView() {
-  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', workspace: 'Workspace', android: 'Android', phone: 'Phone', app: 'App' };
+  const tabs = { engines: 'Engines', providers: 'API providers', local: 'Local AI', tools: 'Toolchain', workspace: 'Workspace', android: 'Android', mcp: 'MCP', phone: 'Phone', app: 'App' };
   main().innerHTML = `
   <h1>Settings</h1>
   <div class="sub">Local configuration. API keys are stored in a separate credentials file and never shown again.</div>
@@ -1417,6 +1478,7 @@ function renderSettingsView() {
   setActiveNav('settings');
   if (S.settingsTab === 'phone' && !S.state?.viewer?.phone) loadPhonePanel();
   if (S.settingsTab === 'workspace' && !WB.workspace) loadWorkspace().then(() => S.view === 'settings' && S.settingsTab === 'workspace' && renderSettingsView()).catch(() => {});
+  if (S.settingsTab === 'mcp' && !WB.mcp) loadMcp().then(() => S.view === 'settings' && S.settingsTab === 'mcp' && renderSettingsView()).catch(() => {});
   if (S.settingsTab === 'android' && !WB.androidTc) loadAndroid(null).then(() => S.view === 'settings' && S.settingsTab === 'android' && renderSettingsView()).catch(() => {});
 }
 
@@ -1432,6 +1494,8 @@ async function loadPhonePanel(view = null) {
     return;
   }
   box.innerHTML = phonePanelHtml(S.phone);
+  if (S.state?.settings) S.state.settings.phone = { ...(S.state.settings.phone || {}), enabled: !!S.phone.enabled };
+  renderPhoneBadge(S.phone);
 }
 
 function phoneSettingsHtml() {
@@ -1471,6 +1535,7 @@ function settingsBodyHtml() {
   if (S.settingsTab === 'phone') return phoneSettingsHtml();
   if (S.settingsTab === 'workspace') return workspaceSettingsHtml();
   if (S.settingsTab === 'android') return androidSettingsHtml();
+  if (S.settingsTab === 'mcp') return mcpSettingsHtml();
   if (S.settingsTab === 'app') return appSettingsHtml();
   return enginesSettingsHtml();
 }
@@ -1748,7 +1813,7 @@ function appSettingsHtml() {
   return `<div class="card flat">
     <div class="card-head"><h2>Application</h2></div>
     <div class="kv">
-      <div>Version</div><div>${esc(S.state.app?.version || '2.5.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
+      <div>Version</div><div>${esc(S.state.app?.version || '2.6.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
       <div>Data folder</div><div class="mono mono-wrap">${esc(S.state.app?.dataRoot || S.state.appDataRoot || 'per-user application data')}</div>
       <div>Default engine</div><div>${esc(engineById(defaultEngineId())?.label || defaultEngineId())}</div>
       <div>Platform</div><div>${esc(S.state.app?.platform || '')} · ${esc(S.state.app?.arch || '')} · Node ${esc(S.state.app?.node || '')}</div>
@@ -1756,6 +1821,8 @@ function appSettingsHtml() {
       <div>GitHub CLI</div><div><div class="row"><input type="text" id="setGhPath" value="${esc(S.state.settings?.github?.ghPath || '')}" placeholder="gh (auto-detect)" style="max-width:260px"><select id="setGhVisibility" style="max-width:120px"><option value="private" ${S.state.settings?.github?.defaultVisibility !== 'public' ? 'selected' : ''}>private</option><option value="public" ${S.state.settings?.github?.defaultVisibility === 'public' ? 'selected' : ''}>public</option></select><button class="btn btn-small" data-act="saveAppSettings">Save</button></div><div class="hint">GitHub actions are explicit; SleepPilot never pushes automatically.</div></div>
     </div>
     <label class="check"><input type="checkbox" id="setNotifications" ${typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'checked' : ''}> Desktop notifications for finished or paused runs</label>
+    <label class="check"><input type="checkbox" id="setSound" ${S.state.settings?.ui?.sound !== false ? 'checked' : ''}> Play a short sound when a run finishes, fails or needs you <a href="#" data-act="testSound" class="hint">(test)</a></label>
+    <label class="check"><input type="checkbox" id="setAssistant" ${S.state.settings?.assistant?.enabled !== false ? 'checked' : ''}> Show the assistant button (💬, lower-right corner)</label>
     <div class="row" style="margin-top:10px"><button class="btn" data-act="enableNotifications">Enable notifications</button><button class="btn btn-ghost" data-act="goHome">Projects</button></div>
     <div class="hint" style="margin-top:10px">SleepPilot stores projects and runs under %LOCALAPPDATA%\\SleepPilot (Windows) or ~/.local/share/SleepPilot. Nothing is written into a project folder except by the agent itself.</div>
   </div>`;
@@ -1764,6 +1831,16 @@ function appSettingsHtml() {
 // ------------------------------------------------------------------ ACTIONS
 
 const ACTIONS = {
+  testSound: () => {
+    const was = S.state?.settings?.ui?.sound;
+    if (S.state?.settings?.ui) S.state.settings.ui.sound = true;
+    playSound('done');
+    if (S.state?.settings?.ui) S.state.settings.ui.sound = was;
+  },
+  openPhoneSettings: () => {
+    S.settingsTab = 'phone';
+    return go('settings');
+  },
   goPreview: () => go('preview'),
   goAndroid: () => go('android'),
   goHome: () => go('home'),
@@ -2018,6 +2095,8 @@ const ACTIONS = {
     const n = Math.max(1, Math.min(12, Number($('#setMaxRuns')?.value) || 3));
     const patch = {
       maxConcurrentRuns: n,
+      ui: { ...(S.state.settings?.ui || {}), sound: !!$('#setSound')?.checked },
+      assistant: { ...(S.state.settings?.assistant || {}), enabled: !!$('#setAssistant')?.checked },
       github: {
         ...(S.state.settings?.github || {}),
         ghPath: $('#setGhPath')?.value.trim() || null,
@@ -2027,6 +2106,7 @@ const ACTIONS = {
     await saveSettingsPatch(patch);
     await loadState();
     renderSettingsView();
+    assistantRefresh();
     toast('App settings saved.');
   },
   enableNotifications: async () => {
@@ -2600,6 +2680,7 @@ document.addEventListener('keydown', (e) => {
 initChat({ S, api, esc, fmtClock, fmtDur, fmtTime, num, markdown, TURN });
 initWorkbench({ S, api, esc, badge, toast, fmtTime, fmtDur, num, openModal, rerender: () => render() });
 window.addEventListener('message', onPreviewMessage);
+initAssistant({ S, api, esc, markdown, go, openProject, toast });
 
 (async function boot() {
   await loadState();
@@ -2611,7 +2692,7 @@ window.addEventListener('message', onPreviewMessage);
   setInterval(() => {
     if (S.view === 'run' && S.run && !['completed', 'stopped', 'failed'].includes(S.run.state)) {
       const head = $('#runHead');
-      if (head && !isEditing()) head.innerHTML = runHeadHtml(S.run);
+      if (head && !isEditing()) morph(head, runHeadHtml(S.run));
     }
   }, 1000);
 })().catch((err) => {

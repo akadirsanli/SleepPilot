@@ -54,6 +54,11 @@ export class ExternalCliEngine extends AgentEngine {
   /** @abstract mutate state through helpers */
   parseLine() {}
 
+  /** Extra CLI arguments for the configured MCP servers (none by default). */
+  async mcpArgs() {
+    return [];
+  }
+
   async connect() {
     if (this.connecting) return this.connecting;
     this.connecting = this._connect().finally(() => (this.connecting = null));
@@ -185,6 +190,13 @@ export class ExternalCliEngine extends AgentEngine {
     const readOnly = session.readOnly === true || role !== 'developer';
     const profile = profileFromRules(session.permissions);
     const built = this.buildArgs({ session, role, readOnly, profile, text });
+    // MCP servers (Settings → MCP) for engines that support them; inserted before a trailing "-"
+    // (the "read the prompt from stdin" marker some CLIs expect last).
+    const mcpArgs = await this.mcpArgs({ readOnly, role }).catch(() => []);
+    if (mcpArgs.length) {
+      const at = built.args.at(-1) === '-' ? built.args.length - 1 : built.args.length;
+      built.args.splice(at, 0, ...mcpArgs);
+    }
     const env = { ...process.env, ...(built.env || {}) };
     const spec = resolveSpawn(this.cli.cliPath, built.args);
     const child = spawn(spec.file, spec.args, {

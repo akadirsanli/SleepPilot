@@ -96,6 +96,14 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
   route('POST', '/api/runs/:pid/:rid/steer', async (p, b) => app.controllerFor(p.rid).steer({ text: b.text, mode: b.mode }));
   route('POST', '/api/runs/:pid/:rid/permission', async (p, b) => (await app.controllerFor(p.rid).replyPermission(b.id, b.decision), { ok: true }));
   route('POST', '/api/runs/:pid/:rid/form', async (p, b) => (await app.controllerFor(p.rid).replyForm(b.id, b.answer), { ok: true }));
+  // MCP servers for the agents
+  route('GET', '/api/mcp', async () => app.mcpView());
+  route('POST', '/api/mcp', async (_, b) => app.saveMcp(b || {}));
+  // Assistant (chat box)
+  route('GET', '/api/assistant', async (_, __, q) => app.assistantView({ projectId: q.get('projectId'), runId: q.get('runId') }));
+  route('POST', '/api/assistant/ask', async (_, b) => app.assistantAsk(b || {}));
+  route('POST', '/api/assistant/settings', async (_, b) => app.saveAssistantSettings(b || {}));
+  route('POST', '/api/assistant/clear', async () => app.clearAssistant());
   // Workspace
   route('GET', '/api/workspace', async () => app.workspaceInfo());
   route('POST', '/api/workspace', async (_, b) => app.setWorkspace(b || {}));
@@ -116,7 +124,7 @@ export async function startWebServer(app, { port = 0, token = secret(24), phone:
   route('POST', '/api/projects/:id/android/install', async (p, b) => app.androidInstall(p.id, b || {}));
   route('POST', '/api/projects/:id/android/logcat', async (p, b) => app.androidDeviceErrors(p.id, b || {}));
   route('POST', '/api/projects/:id/android/wrapper', async (p) => app.androidAddWrapper(p.id));
-  route('POST', '/api/projects/:id/android/check', async (p) => app.androidAddCheck(p.id));
+  route('POST', '/api/projects/:id/android/check', async (p, b) => app.androidAddCheck(p.id, b || {}));
   route('GET', '/api/projects/:id/android/file', async (p, _, q) => app.androidArtifactFile(p.id, q.get('path')));
 
   const handle = async (req, res, ctx) => {

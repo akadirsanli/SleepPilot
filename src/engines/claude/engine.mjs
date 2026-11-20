@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { ExternalCliEngine, findExternalCli, authHint, classifyForEngine, signedInFromText } from '../external-cli/engine.mjs';
 import { runFile } from '../../util/proc.mjs';
 import { parseResetHint } from '../../orchestrator/quota-tracker.mjs';
+import { serversFor, writeClaudeMcpConfig } from '../../mcp/mcp.mjs';
 
 /** Actual values accepted by the installed Claude Code CLI (`--effort`). */
 export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -35,6 +36,14 @@ export class ClaudeEngine extends ExternalCliEngine {
       }
     }
     return result;
+  }
+
+  /** --mcp-config with the servers this role may use; their tools are allowed without a prompt. */
+  async mcpArgs({ readOnly }) {
+    const servers = serversFor(this.settings, { engine: 'claude', readOnly, getEnv: (n) => this.credentials?.getEnv(n) || '' });
+    if (!servers.length) return [];
+    const file = await writeClaudeMcpConfig(servers, readOnly ? 'read-only' : 'developer');
+    return ['--mcp-config', file, '--allowedTools', servers.map((s) => `mcp__${s.name}`).join(',')];
   }
 
   async probeCli() {

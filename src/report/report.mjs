@@ -177,7 +177,7 @@ export function buildReport({ project, run, iterations, stats = null }) {
   return lines.join('\n');
 }
 
-const ROLE = { developer: 'Developer', manager: 'Manager', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check' };
+const ROLE = { developer: 'Developer', manager: 'Manager', reviewer: 'Reviewer', closing: 'Closing report', preflight: 'Model check', second_opinion: 'Second opinion' };
 
 /** Measured statistics (same numbers as the report screen's charts) in text form. */
 function statsSection(lines, st) {
