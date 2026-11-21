@@ -1,4 +1,13 @@
 /**
+ * True when OpenCode answered that the session itself does not exist (HTTP 404
+ * SessionNotFoundError) — e.g. its database lost it in a crash. A plain 404 for an unknown route
+ * is not this: that means an API mismatch.
+ */
+export function isSessionNotFound(err) {
+  return err?.name === 'OpenCodeHttpError' && err.status === 404 && /SessionNotFound/i.test(String(err.tag || err.body?._tag || ''));
+}
+
+/**
  * Classify OpenCode / provider failures into categories with distinct handling.
  * Input: a Session.StructuredError ({type, message, status}) from a message or idle marker,
  * an OpenCodeHttpError, or an OpenCodeConnectionError.

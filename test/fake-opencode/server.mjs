@@ -42,17 +42,27 @@ const NO_CREDITS_PROVIDER = process.env.SLEEPPILOT_FAKE_NO_CREDITS_PROVIDER || n
 
 const sessions = new Map();
 let startup503 = Number(process.env.SLEEPPILOT_FAKE_STARTUP_503 || 0);
+const STARTED_AT = new Date().toISOString();
 // Optional durable state (like OpenCode's database) so restart/recovery can be tested.
+// Like a database commit, every change is written before the request that caused it is answered
+// (and atomically, via rename): a server killed right after accepting a session or a prompt must
+// not come back without it. A 100 ms timer used to do this, and a crash inside that window made
+// the restarted server answer 404 for a session the client had already used.
 const STATE_FILE = process.env.SLEEPPILOT_FAKE_STATE;
 if (STATE_FILE && fs.existsSync(STATE_FILE)) {
   for (const s of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) sessions.set(s.id, { ...s, queue: [], running: false, ctx: null });
 }
+const LOADED_SESSIONS = sessions.size;
 function saveState() {
   if (!STATE_FILE) return;
   const data = [...sessions.values()].map(({ queue, running, ctx, ...rest }) => rest);
-  fs.writeFileSync(STATE_FILE, JSON.stringify(data));
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data));
+  fs.renameSync(tmp, STATE_FILE);
 }
-setInterval(saveState, 100).unref();
+/** 404 for an unknown session, saying which server process answered (helps debug restarts). */
+const sessionNotFound = (res, sid) =>
+  send(res, 404, { _tag: 'SessionNotFoundError', message: `session ${sid} not found (fake server pid ${process.pid}, started ${STARTED_AT}, ${LOADED_SESSIONS} session(s) loaded from state, ${sessions.size} known)` });
 const permissions = new Map(); // id -> {req, resolve}
 const forms = new Map();
 const failCounters = new Map(); // key -> remaining failures
@@ -324,11 +334,13 @@ async function execute(session) {
     emit('session.usage.updated', { sessionID: session.id, cost: assistant.cost, tokens });
     session.messages.push(assistant);
     session.cost += assistant.cost;
+    saveState();
     if (noIdle) continue;
     const outcome = ctx.interrupted ? 'interrupted' : error ? 'failed' : 'succeeded';
     session.messages.push({ id: id('msg_'), type: 'idle', time: { created: Date.now() }, outcome, ...(error && !ctx.interrupted ? { error } : {}) });
     session.outcome = outcome;
     session.time.idle = Date.now();
+    saveState();
     emit(`session.execution.${outcome}`, { sessionID: session.id, ...(ctx.interrupted ? { reason: 'user' } : {}) });
   }
   session.running = false;
@@ -387,16 +399,17 @@ const server = http.createServer(async (req, res) => {
       const b = await body(req);
       const s = { id: id('ses_'), title: b.title, agent: b.agent, model: b.model, location: b.location, permissions: b.permissions, messages: [], queue: [], running: false, cost: 0, time: { created: Date.now(), updated: Date.now() }, badJsonOnce: process.env.SLEEPPILOT_FAKE_BAD_JSON === '1' };
       sessions.set(s.id, s);
+      saveState();
       emit('session.created', { sessionID: s.id }, s.location);
       return send(res, 200, { data: sessionInfo(s) });
     }
     if ((m = p.match(/^\/api\/session\/(ses[^/]+)$/))) {
       const s = sessions.get(m[1]);
-      return s ? send(res, 200, { data: sessionInfo(s) }) : send(res, 404, { _tag: 'SessionNotFoundError', message: 'not found' });
+      return s ? send(res, 200, { data: sessionInfo(s) }) : sessionNotFound(res, m[1]);
     }
     if ((m = p.match(/^\/api\/session\/(ses[^/]+)\/prompt$/))) {
       const s = sessions.get(m[1]);
-      if (!s) return send(res, 404, { _tag: 'SessionNotFoundError' });
+      if (!s) return sessionNotFound(res, m[1]);
       const b = await body(req);
       const mid = b.id || id('msg_');
       const existing = s.messages.find((x) => x.id === mid) || s.queue.find((x) => x.id === mid);
@@ -404,6 +417,7 @@ const server = http.createServer(async (req, res) => {
         const user = { id: mid, type: 'user', time: { created: Date.now() }, text: b.text, metadata: b.metadata };
         s.messages.push(user);
         s.queue.push(user);
+        saveState();
         emit('session.inbox.enqueued', { sessionID: s.id, inboxID: mid }, s.location);
         setImmediate(() => execute(s));
       }
@@ -411,7 +425,7 @@ const server = http.createServer(async (req, res) => {
     }
     if ((m = p.match(/^\/api\/session\/(ses[^/]+)\/message$/))) {
       const s = sessions.get(m[1]);
-      if (!s) return send(res, 404, { _tag: 'SessionNotFoundError' });
+      if (!s) return sessionNotFound(res, m[1]);
       // Mirrors OpenCode 2.2.0: the cursor is opaque and carries the order; combining it with
       // `order` is rejected with HTTP 400 InvalidCursorError.
       const rawCursor = url.searchParams.get('cursor');

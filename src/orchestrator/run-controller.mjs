@@ -13,7 +13,7 @@ import { detectPreview } from '../preview/preview.mjs';
 import fsp from 'node:fs/promises';
 import nodePath from 'node:path';
 import { reconcileTurn } from '../opencode/adapter.mjs';
-import { classifyError } from '../opencode/errors.mjs';
+import { classifyError, isSessionNotFound } from '../opencode/errors.mjs';
 import { newMessageId, sha1 } from '../util/ids.mjs';
 import { redact } from '../util/redact.mjs';
 import { logger } from '../util/log.mjs';
@@ -2326,6 +2326,20 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     await this.persist();
   }
 
+  /** Stop using a session the engine has lost: the next turn of its role / task opens a new one. */
+  forgetSession(sessionID) {
+    const run = this.run;
+    for (const t of run.tasks || []) {
+      if (t.devSessionId === sessionID) {
+        t.devSessionId = null;
+        t.devSessionScoped = false;
+      }
+      if (t.reviewSession?.id === sessionID) t.reviewSession = null;
+    }
+    for (const role of Object.keys(run.sessions || {})) if (run.sessions[role] === sessionID) run.sessions[role] = null;
+    this.sessionHarness.delete(sessionID);
+  }
+
   async recoverOneTurn(at) {
     const run = this.run;
     if (!at) return;
@@ -2335,8 +2349,16 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     try {
       turnInfo = await this.adapterForHarness(at.harness || this.sessionRoute(at.sessionID).harness).turnMessages(at.sessionID, at.messageId);
     } catch (err) {
-      this.addLog({ kind: 'error', text: `Could not read ${this.engineName} during recovery: ${redact(err.message)}` });
-      throw err;
+      // The engine no longer knows the session at all (its records were lost with the crash).
+      // Nothing of this turn can be reconciled; like an instruction that never arrived, the task is
+      // retried — in a new session, since the recorded one cannot be used again.
+      if (!isSessionNotFound(err)) {
+        this.addLog({ kind: 'error', text: `Could not read ${this.engineName} during recovery: ${redact(err.message)}` });
+        throw err;
+      }
+      this.addLog({ kind: 'warning', text: `Recovery: ${this.engineName} no longer has session ${at.sessionID} (${redact(err.message)}); treating the instruction as not delivered.` });
+      this.forgetSession(at.sessionID);
+      turnInfo = { found: false, user: null, after: [] };
     }
     const iterFile = at.iterationN ? await this.store.getIteration(run.projectId, run.id, at.iterationN) : null;
     const task = iterFile ? run.tasks.find((t) => t.id === iterFile.taskId) : null;
