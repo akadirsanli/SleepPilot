@@ -32,6 +32,7 @@ import { PreviewManager, detectPreview, effectivePreview, sanitizePreviewConfig 
 import { AndroidService } from '../android/service.mjs';
 import { configureAndroid, cachedAndroidToolchain } from '../android/toolchain.mjs';
 import { stopStartedEmulators } from '../android/run.mjs';
+import { closeLeftoverBrowsers } from '../checks/html-smoke.mjs';
 import { PROJECT_TEMPLATES, scaffoldTemplate } from '../android/templates.mjs';
 import { Assistant, buildStatus, stateText } from '../assistant/assistant.mjs';
 import { MCP_PRESETS, MCP_ENGINES } from '../mcp/mcp.mjs';
@@ -89,6 +90,8 @@ export class SleepPilotApp extends EventEmitter {
     if (this.recover) await this.recoverRuns();
     if (this.autoConnect) {
       this.manager.connectDefault().catch((err) => log.error(`connect failed: ${err.message}`));
+      // Browsers of the HTML check left running by an earlier session that crashed or was restarted.
+      closeLeftoverBrowsers().then((n) => n && log.warn(`closed ${n} leftover check browser process(es)`)).catch(() => {});
       // Finds Android Studio's JDK/SDK once, so agent turns can run gradlew without PATH changes.
       cachedAndroidToolchain().catch((err) => log.warn(`android toolchain detection failed: ${err.message}`));
     }
@@ -264,7 +267,7 @@ export class SleepPilotApp extends EventEmitter {
     const activeList = this.activeControllers();
     const active = activeList[0] || null;
     return {
-      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.6.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.6.1', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
       workspace: { dir: this.settings.workspace?.dir || null, configured: !!this.settings.workspace?.dir },
       templates: Object.values(PROJECT_TEMPLATES).map((t) => ({ id: t.id, label: t.label, android: t.android })),
       previews: this.previews.running().map((p) => ({ projectId: p.projectId, url: p.url, mode: p.mode, state: p.state })),
@@ -1022,6 +1025,7 @@ export class SleepPilotApp extends EventEmitter {
     await this.previews.stopAll().catch(() => {});
     await this.android.cancelAll().catch(() => {});
     stopStartedEmulators();
+    await closeLeftoverBrowsers().catch(() => {});
     for (const t of this.recoveryTimers || []) clearTimeout(t);
     // A clean shutdown is the user's decision: the next start must not continue the run by itself.
     for (const c of this.controllers.values()) {

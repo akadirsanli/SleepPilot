@@ -6,7 +6,49 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { findBrowsers } from './browser.mjs';
-import { killTree } from '../util/proc.mjs';
+import { killTree, runFile } from '../util/proc.mjs';
+
+/**
+ * Every check browser uses its own temporary profile folder named with this prefix. The prefix is
+ * how leftover browsers are found and closed — never any other browser of the user.
+ */
+export const PROFILE_PREFIX = 'sleeppilot-edge-';
+const ACTIVE = new Map(); // pid -> profile folder
+
+/**
+ * Close every browser process started with `marker` in its command line (our profile folder):
+ * Edge/Chrome may hand work to processes outside the tree of the process SleepPilot started, and a
+ * crash or restart of SleepPilot skips the normal shutdown. A page left running (a 3D game) costs
+ * a full CPU core per window.
+ */
+export async function killBrowsersByMarker(marker) {
+  const m = String(marker || '');
+  if (!m.includes(PROFILE_PREFIX)) return 0;
+  if (process.platform === 'win32') {
+    const safe = m.replace(/'/g, "''");
+    const ps = `$n=0; Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe' OR Name='chromium.exe'" | Where-Object { $_.CommandLine -like '*${safe}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; Write-Output $n`;
+    const r = await runFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps], { timeoutMs: 30_000 }).catch(() => null);
+    return Number(String(r?.stdout || '').trim()) || 0;
+  }
+  const r = await runFile('pkill', ['-9', '-f', m], { timeoutMs: 15_000 }).catch(() => null);
+  return r?.exitCode === 0 ? 1 : 0;
+}
+
+/** At start and at shutdown: close check browsers left by this or an earlier (crashed) session. */
+export async function closeLeftoverBrowsers() {
+  for (const pid of ACTIVE.keys()) killTree(pid);
+  ACTIVE.clear();
+  return killBrowsersByMarker(PROFILE_PREFIX);
+}
+
+// One check browser at a time: parallel developers and screenshot requests queue up instead of
+// starting several browsers that each run the page.
+let slot = Promise.resolve();
+function withBrowserSlot(fn) {
+  const run = slot.then(fn, fn);
+  slot = run.catch(() => {});
+  return run;
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -58,6 +100,10 @@ function staticServer(root) {
  * right after an Edge update, headless msedge.exe exited at once with code 0 and no DevTools line.
  */
 export async function runHtmlSmoke(opts) {
+  return withBrowserSlot(() => runHtmlSmokeNow(opts));
+}
+
+async function runHtmlSmokeNow(opts) {
   const browsers = findBrowsers();
   if (!browsers.length) return { status: 'skipped', summary: 'Microsoft Edge or Chrome not found; the HTML check is unavailable.', pages: [] };
   const startErrors = [];
@@ -99,15 +145,34 @@ export async function captureScreenshots({ projectDir, shots, outDir, prefix = '
 async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 60, settleMs = 2000, screenshot = null }) {
   const server = await staticServer(projectDir);
   const port = server.address().port;
-  const profile = await fsp.mkdtemp(path.join(os.tmpdir(), 'sleeppilot-edge-'));
+  const profile = await fsp.mkdtemp(path.join(os.tmpdir(), PROFILE_PREFIX));
   const browser = spawn(
     browserPath,
-    // Chrome refuses to run as root without --no-sandbox (Linux containers, CI images).
-    ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank'],
+    [
+      '--headless=new',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-extensions',
+      // Never stay in the background after the check, never play sound, and stay off-screen even
+      // if a browser version ignores --headless.
+      '--disable-background-mode',
+      '--disable-features=msEdgeStartupBoost,msEdgeSidebarV2',
+      '--mute-audio',
+      '--window-position=-32000,-32000',
+      '--window-size=1280,800',
+      // Chrome refuses to run as root without --no-sandbox (Linux containers, CI images).
+      ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
+      `--user-data-dir=${profile}`,
+      '--remote-debugging-port=0',
+      'about:blank',
+    ],
     { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
   );
+  if (browser.pid) ACTIVE.set(browser.pid, profile);
   const pages = [];
   let started = false;
+  let cdp = null;
   try {
     const wsUrl = await new Promise((resolve, reject) => {
       let buf = '';
@@ -123,21 +188,19 @@ async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 6
       browser.on('exit', () => reject(new Error('The browser closed unexpectedly.')));
     });
     started = true;
-    const cdp = await connectCdp(wsUrl);
+    cdp = await connectCdp(wsUrl);
     for (const [i, entry] of entries.entries()) {
       const shot = screenshot ? { file: path.join(screenshot.outDir, `${screenshot.prefix}-${i + 1}.png`), device: screenshot.devices?.[i] || 'desktop' } : null;
       pages.push(await checkPage(cdp, entryUrl(port, entry), entry, timeoutSec, settleMs, shot));
     }
-    cdp.close();
   } catch (err) {
     if (!started) return { startFailed: err.message };
     // The browser started but the DevTools connection failed. That is an unavailable
     // check, not evidence that the project's HTML is broken.
     return { status: 'skipped', summary: `The HTML check is unavailable: ${err.message}`, pages };
   } finally {
-    killTree(browser.pid);
+    await shutdownBrowser(browser, cdp, profile);
     server.close();
-    setTimeout(() => fs.rm(profile, { recursive: true, force: true }, () => {}), 1500);
   }
   const failed = pages.filter((p) => !p.ok);
   return {
@@ -147,6 +210,32 @@ async function runWithBrowser(browserPath, { projectDir, entries, timeoutSec = 6
       : `${pages.length} page(s) loaded without errors.`,
     pages,
   };
+}
+
+/**
+ * Close the check browser for sure: ask it to quit (CDP Browser.close), then kill its process
+ * tree, then every process still using its profile folder, then delete the folder.
+ */
+async function shutdownBrowser(browser, cdp, profile) {
+  if (cdp) {
+    await Promise.race([cdp.send('Browser.close').catch(() => {}), new Promise((r) => setTimeout(r, 2000))]);
+    try {
+      cdp.close();
+    } catch {}
+  }
+  if (browser.exitCode == null) {
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, 2500);
+      browser.once('exit', () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  }
+  killTree(browser.pid);
+  ACTIVE.delete(browser.pid);
+  await killBrowsersByMarker(path.basename(profile));
+  setTimeout(() => fs.rm(profile, { recursive: true, force: true }, () => {}), 1500).unref?.();
 }
 
 async function checkPage(cdp, url, entry, timeoutSec, settleMs, shot = null) {

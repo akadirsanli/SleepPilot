@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.6.1 — no more browser windows piling up
+
+### Fixed
+
+- **Browsers left running after HTML checks.** On an HTML project (seen with a 3D
+  game) many browser windows stayed open and kept the CPU at 100%. The check
+  browser is now always closed: SleepPilot asks it to quit, kills its process
+  tree, then every process still using its private profile folder. Leftovers from
+  a session that crashed or was restarted are closed when SleepPilot starts and
+  when it closes. Only one check browser runs at a time (parallel developers
+  queue), it is muted, and it stays off-screen even if a browser ignores
+  headless mode.
+- **Agents may no longer open visible windows.** Commands such as `start`,
+  `Start-Process`, `explorer`, `msedge`, `chrome`, `open` and `xdg-open` are
+  denied for the developer (Claude Code: `--disallowedTools`), and the developer
+  prompt says why: SleepPilot checks pages headlessly and the user has the live
+  preview.
+
 ## 2.6.0 — assistant, second opinion, MCP and Android run check
 
 ### Added

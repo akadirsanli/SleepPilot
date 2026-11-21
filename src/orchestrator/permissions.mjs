@@ -14,6 +14,10 @@ export const ALWAYS_DENY_SHELL = [
   'rm -rf*', 'rm -r *', 'rm -fr*', 'rmdir /s*', 'rd /s*', 'del /s*', 'del /q*', 'erase /s*',
   'Remove-Item*-Recurse*', 'Remove-Item*-r *', 'format *', 'diskpart*', 'shutdown*', 'Stop-Computer*', 'Restart-Computer*',
   'reg *', 'Set-ExecutionPolicy*', 'opencode auth*', 'opencode-cli auth*', 'setx *', 'netsh *', 'schtasks *',
+  // Opening pages or apps in a visible window: every attempt leaves a window behind (a 3D page keeps
+  // a CPU core busy). SleepPilot checks pages headlessly and the user has the live preview.
+  'start *', '*cmd* /c start *', 'Start-Process*', '*Start-Process *', 'Invoke-Item*', 'ii *', 'explorer*', '*explorer.exe*',
+  'msedge*', '*msedge.exe*', 'chrome*', '*chrome.exe*', 'firefox*', '*firefox.exe*', 'open *', 'xdg-open*', 'rundll32*url.dll*',
 ];
 
 /** Commands the balanced profile allows without asking (read-only inspection, local builds/tests). */

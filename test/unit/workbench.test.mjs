@@ -554,3 +554,59 @@ test('android: adb device list and Gradle download checksum', async () => {
   assert.equal((await downloadGradle({ version: '0.1', fetchImpl: fetchImpl(true) })).alreadyInstalled, true);
   await assert.rejects(() => downloadGradle({ version: '../x' }), /Invalid Gradle version/);
 });
+
+// ------------------------------------------------------------------ check browsers never leak
+
+test('html check: the browser is fully closed after the check; leftovers are swept', { timeout: 120_000 }, async () => {
+  const { findBrowsers } = await import('../../src/checks/browser.mjs');
+  if (!findBrowsers().length && fs.existsSync('/opt/pw-browsers')) {
+    const dir = fs.readdirSync('/opt/pw-browsers').find((d) => /^chromium-\d+$/.test(d));
+    const exe = dir && ['chrome-linux64/chrome', 'chrome-linux/chrome'].map((p) => path.join('/opt/pw-browsers', dir, p)).find((p) => fs.existsSync(p));
+    if (exe) process.env.SLEEPPILOT_BROWSER = exe;
+  }
+  const { runHtmlSmoke, closeLeftoverBrowsers, PROFILE_PREFIX } = await import('../../src/checks/html-smoke.mjs');
+  const { spawn, execFileSync } = await import('node:child_process');
+  const running = () => {
+    if (process.platform === 'win32') {
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${PROFILE_PREFIX}*' -and $_.Name -ne 'powershell.exe' }).Count`], { encoding: 'utf8' });
+      return Number(out.trim()) || 0;
+    }
+    try {
+      return execFileSync('pgrep', ['-f', PROFILE_PREFIX], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  if (findBrowsers().length) {
+    const dir = tmp('busy-page');
+    // A page that keeps the CPU busy, like a game loop.
+    write(path.join(dir, 'index.html'), '<!doctype html><title>Busy</title><canvas id=c></canvas><script>const x=document.getElementById("c").getContext("2d");(function f(){for(let i=0;i<2e5;i++)x.fillRect(i%300,i%150,1,1);requestAnimationFrame(f)})()</script>');
+    // Three checks at the same time (parallel developers): they queue, one browser at a time.
+    const results = await Promise.all([1, 2, 3].map(() => runHtmlSmoke({ projectDir: dir, entries: ['index.html'], timeoutSec: 20, settleMs: 500 })));
+    for (const r of results) assert.notEqual(r.status, 'failed', r.summary);
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(running(), 0, 'no check browser process is left running');
+  }
+  if (process.platform !== 'win32') {
+    // A leftover from a crashed session (a process carrying our profile marker) is closed.
+    const ghost = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--', `--user-data-dir=/tmp/${PROFILE_PREFIX}ghost`], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.ok(running() >= 1);
+    await closeLeftoverBrowsers();
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(ghost.exitCode !== null || ghost.signalCode !== null, true, 'the leftover was killed');
+  }
+});
+
+test('agents may not open visible browser or app windows', async () => {
+  const { developerRuleset } = await import('../../src/orchestrator/permissions.mjs');
+  const rules = developerRuleset('full', { unattended: true, projectDir: '/p' });
+  const denied = rules.filter((r) => r.action === 'shell' && r.effect === 'deny').map((r) => r.resource);
+  for (const p of ['start *', 'Start-Process*', 'msedge*', 'open *', 'xdg-open*', 'explorer*']) assert.ok(denied.includes(p), p);
+  const { developerPrompt } = await import('../../src/orchestrator/prompts.mjs');
+  const text = developerPrompt({ project: { name: 'p' }, objective: { version: 1, text: 'x' }, rules: '', task: { id: 'T1', title: 't', description: 'd', acceptance: [] }, tasks: [], previousAttempts: [], checks: [], opts: {} });
+  assert.match(text, /Never open pages, browsers or other windows/);
+  const { ClaudeEngine } = await import('../../src/engines/claude/engine.mjs');
+  const args = new ClaudeEngine({ settings: {} }).buildArgs({ session: { effort: null }, readOnly: false, profile: 'full' }).args;
+  assert.match(args[args.indexOf('--disallowedTools') + 1], /Bash\(start:\*\).*Bash\(msedge:\*\)/);
+});

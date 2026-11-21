@@ -207,6 +207,7 @@ SAFETY RULES (mandatory):
 ${opts.protectedPaths?.length ? `- PROTECTED (never modify; SleepPilot denies it): ${opts.protectedPaths.join(', ')}\n` : ''}- Do not run git commit, push, reset, checkout, restore, clean, stash or any history-changing command. SleepPilot never commits for the user.
 - Never delete or overwrite existing user work that the task does not require changing. Do not remove files you did not create unless the task says so.
 - Do not print, copy or store credentials, API keys or tokens.
+- Never open pages, browsers or other windows (no start, Start-Process, explorer, msedge, chrome, open, xdg-open, webbrowser.open): each one stays open and keeps the computer busy. SleepPilot checks pages in a hidden browser after your task, and the user watches the live preview. To test JavaScript, use node or a headless tool that exits by itself.
 ${opts.unattended ? '- The user is ASLEEP and cannot answer questions or approve anything. Do not ask questions. Decide reasonably within the objective and rules, state your assumption in the summary, and finish the task. Use needs_user only if any choice could cause serious harm.\n' : '- If something is ambiguous and only the user can decide, stop and report needs_user instead of guessing.\n'}
 ALREADY COMPLETED TASKS:
 ${done.length ? done.map((t) => `- [${t.id}] ${t.title} (${t.status === 'verified' ? 'verified' : 'implemented, not verified'})`).join('\n') : '(none)'}
