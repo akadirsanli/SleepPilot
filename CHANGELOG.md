@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Recovery when OpenCode lost the session.** If, after a crash or restart,
+  OpenCode no longer knows the session of the last instruction (HTTP 404
+  `SessionNotFoundError`), recovery now treats the instruction as not delivered
+  and retries the task in a new session. Before, the whole run ended as an
+  unexpected error and the iteration stayed "running".
+- **Flaky crash-recovery test.** The fake OpenCode server saved its state only
+  every 100 ms, so a crash right after a session was created could bring the
+  restarted server back without it. It now saves every change before answering,
+  atomically, and the test waits for the "crashed" server to exit.
+
 ## 2.6.1 — no more browser windows piling up
 
 ### Fixed
