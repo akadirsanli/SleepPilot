@@ -98,6 +98,8 @@ export class ClaudeEngine extends ExternalCliEngine {
       const mode = this.cli.permissionMode && this.cli.permissionMode !== 'auto' ? this.cli.permissionMode : profile === 'full' || profile === 'unrestricted' ? 'bypassPermissions' : 'acceptEdits';
       if (mode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
       else args.push('--permission-mode', mode);
+      // Even with every permission granted: no visible browser or app windows (they pile up).
+      args.push('--disallowedTools', 'Bash(start:*),Bash(Start-Process:*),Bash(explorer:*),Bash(msedge:*),Bash(chrome:*),Bash(open:*),Bash(xdg-open:*),PowerShell(Start-Process:*),PowerShell(start:*),PowerShell(Invoke-Item:*)');
     }
     args.push(...(this.cli.extraArgs || []));
     return { args };

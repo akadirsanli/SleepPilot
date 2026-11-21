@@ -1813,7 +1813,7 @@ function appSettingsHtml() {
   return `<div class="card flat">
     <div class="card-head"><h2>Application</h2></div>
     <div class="kv">
-      <div>Version</div><div>${esc(S.state.app?.version || '2.6.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
+      <div>Version</div><div>${esc(S.state.app?.version || '2.6.1')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
       <div>Data folder</div><div class="mono mono-wrap">${esc(S.state.app?.dataRoot || S.state.appDataRoot || 'per-user application data')}</div>
       <div>Default engine</div><div>${esc(engineById(defaultEngineId())?.label || defaultEngineId())}</div>
       <div>Platform</div><div>${esc(S.state.app?.platform || '')} · ${esc(S.state.app?.arch || '')} · Node ${esc(S.state.app?.node || '')}</div>

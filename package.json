@@ -1,6 +1,6 @@
 {
   "name": "sleeppilot",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Autonomous engineering harness with OpenCode, Claude Code, Codex, OpenAI-compatible APIs, DeepSeek Harness and custom CLIs; Scout toolchain detection, evidence-based verification, a project workspace, live web preview, Android APK builds, multi-project runs, GitHub publishing and Sleep & Reverse & Rust It.",
   "license": "MIT",
   "author": "akadirsanli",
