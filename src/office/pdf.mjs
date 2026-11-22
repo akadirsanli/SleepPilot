@@ -21,8 +21,10 @@ export async function readPdf(file, { maxPages = 200, password = '' } = {}) {
     useSystemFonts: false,
     disableFontFace: true,
     verbosity: 0,
-    standardFontDataUrl: path.join(pdfDir, 'standard_fonts') + path.sep,
-    cMapUrl: path.join(pdfDir, 'cmaps') + path.sep,
+    // pdf.js wants these folders with a trailing "/" on every platform (a Windows "\\" is rejected);
+    // Node's fs accepts forward slashes on Windows too.
+    standardFontDataUrl: `${toSlash(path.join(pdfDir, 'standard_fonts'))}/`,
+    cMapUrl: `${toSlash(path.join(pdfDir, 'cmaps'))}/`,
     cMapPacked: true,
   });
   let pdf;
@@ -67,6 +69,8 @@ export async function readPdf(file, { maxPages = 200, password = '' } = {}) {
     await task.destroy();
   }
 }
+
+const toSlash = (p) => p.split(path.sep).join('/');
 
 function linesFromItems(items) {
   const rows = [];
