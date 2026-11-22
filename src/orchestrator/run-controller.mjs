@@ -13,7 +13,7 @@ import { detectPreview } from '../preview/preview.mjs';
 import fsp from 'node:fs/promises';
 import nodePath from 'node:path';
 import { reconcileTurn } from '../opencode/adapter.mjs';
-import { classifyError } from '../opencode/errors.mjs';
+import { classifyError, isSessionNotFound } from '../opencode/errors.mjs';
 import { newMessageId, sha1 } from '../util/ids.mjs';
 import { redact } from '../util/redact.mjs';
 import { logger } from '../util/log.mjs';
@@ -23,6 +23,10 @@ import * as P from './prompts.mjs';
 import { makeTask, setTaskStatus, applyTaskUpdates, resolveDependencies, selectNextTask, selectWave, inScope, taskCounts, normalizeScope, clampPriority, FINAL_STATUSES } from './tasks.mjs';
 import { HarnessRouter, modelForHarness, RoutingConfigError, READ_ONLY_CAPABLE } from './routing.mjs';
 import { QuotaTracker } from './quota-tracker.mjs';
+import { fileURLToPath } from 'node:url';
+
+/** How the developer calls SleepPilot's office tools from its shell (absolute, quoted path). */
+const OFFICE_CLI = `node "${nodePath.join(nodePath.dirname(fileURLToPath(import.meta.url)), '..', 'main.mjs')}" office`;
 
 const log = logger('run');
 
@@ -1302,7 +1306,7 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
 
   promptOpts() {
     const l = this.run.limits;
-    return { scope: l.scopeMode || 'strict', unattended: !!l.unattended, language: l.language || 'en', protectedPaths: l.protectedPaths || [], parallel: l.parallelDevelopers || 1, scout: this.run.scout || null };
+    return { scope: l.scopeMode || 'strict', unattended: !!l.unattended, language: l.language || 'en', protectedPaths: l.protectedPaths || [], parallel: l.parallelDevelopers || 1, scout: this.run.scout || null, officeCli: OFFICE_CLI };
   }
 
   limitsInfo() {
@@ -2094,7 +2098,9 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
       try {
         const sid = this.waveCheckCache ? await this.reviewSessionFor(task) : await this.ensureSession('reviewer');
         const screenshotPages = await this.screenshotPages();
-        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: { ...this.promptOpts(), screenshotPages } }), { iterationN: n, task, taskType: 'review' });
+        // Office files are binary: the reviewer gets SleepPilot's reading of them instead of a diff.
+        const officeFiles = await import('../office/check.mjs').then((m) => m.officePreviews(this.project.dir, changedFiles)).catch(() => '');
+        const rt = await this.roleTurn('reviewer', sid, P.reviewPrompt({ objective: this.project.objective, task, developerSummary: turn.finalText, changes, patches: changes.patches, checks: iteration.checks, opts: { ...this.promptOpts(), screenshotPages, officeFiles } }), { iterationN: n, task, taskType: 'review' });
         let j = extractJson(rt.finalText || rt.allText);
         // Screenshots only when the reviewer asks for them, at most 3, and one extra turn.
         const wanted = screenshotPages.length && Array.isArray(j?.screenshots) ? j.screenshots : [];
@@ -2192,6 +2198,7 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     if (changedFiles.some((f) => /\.html?$/i.test(f) && !f.includes('/'))) want.push(['html-smoke', 'HTML load and JavaScript error check', { entries: [] }]);
     if (changedFiles.some((f) => /\.(m|c)?js$/i.test(f))) want.push(['js-syntax', 'JavaScript syntax (node --check)', {}]);
     if (changedFiles.some((f) => /\.py$/i.test(f))) want.push(['py-syntax', 'Python syntax (ast.parse)', {}]);
+    if (changedFiles.some((f) => /\.(xlsx|xlsm|csv|tsv|docx|pptx|pdf)$/i.test(f) && !/(^|\/)(node_modules|\.sleeppilot)\//.test(f))) want.push(['office', 'Office files open and look right (Excel, Word, PDF, PNG …)', { expect: [] }]);
     let added = false;
     for (const [type, name, extra] of want) {
       if (this.project.checks.some((c) => c.type === type)) continue;
@@ -2326,6 +2333,20 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     await this.persist();
   }
 
+  /** Stop using a session the engine has lost: the next turn of its role / task opens a new one. */
+  forgetSession(sessionID) {
+    const run = this.run;
+    for (const t of run.tasks || []) {
+      if (t.devSessionId === sessionID) {
+        t.devSessionId = null;
+        t.devSessionScoped = false;
+      }
+      if (t.reviewSession?.id === sessionID) t.reviewSession = null;
+    }
+    for (const role of Object.keys(run.sessions || {})) if (run.sessions[role] === sessionID) run.sessions[role] = null;
+    this.sessionHarness.delete(sessionID);
+  }
+
   async recoverOneTurn(at) {
     const run = this.run;
     if (!at) return;
@@ -2335,8 +2356,16 @@ Do this now: ${op.advice || 'take a different approach than in the previous atte
     try {
       turnInfo = await this.adapterForHarness(at.harness || this.sessionRoute(at.sessionID).harness).turnMessages(at.sessionID, at.messageId);
     } catch (err) {
-      this.addLog({ kind: 'error', text: `Could not read ${this.engineName} during recovery: ${redact(err.message)}` });
-      throw err;
+      // The engine no longer knows the session at all (its records were lost with the crash).
+      // Nothing of this turn can be reconciled; like an instruction that never arrived, the task is
+      // retried — in a new session, since the recorded one cannot be used again.
+      if (!isSessionNotFound(err)) {
+        this.addLog({ kind: 'error', text: `Could not read ${this.engineName} during recovery: ${redact(err.message)}` });
+        throw err;
+      }
+      this.addLog({ kind: 'warning', text: `Recovery: ${this.engineName} no longer has session ${at.sessionID} (${redact(err.message)}); treating the instruction as not delivered.` });
+      this.forgetSession(at.sessionID);
+      turnInfo = { found: false, user: null, after: [] };
     }
     const iterFile = at.iterationN ? await this.store.getIteration(run.projectId, run.id, at.iterationN) : null;
     const task = iterFile ? run.tasks.find((t) => t.id === iterFile.taskId) : null;

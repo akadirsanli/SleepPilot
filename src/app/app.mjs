@@ -267,7 +267,7 @@ export class SleepPilotApp extends EventEmitter {
     const activeList = this.activeControllers();
     const active = activeList[0] || null;
     return {
-      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.6.1', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
+      app: { name: 'SleepPilot', tagline: 'Plan. Build. Verify. Sleep.', version: '2.7.0', testMode: this.testMode, platform: process.platform, arch: process.arch, node: process.versions.node, dataRoot: dataRoot() },
       workspace: { dir: this.settings.workspace?.dir || null, configured: !!this.settings.workspace?.dir },
       templates: Object.values(PROJECT_TEMPLATES).map((t) => ({ id: t.id, label: t.label, android: t.android })),
       previews: this.previews.running().map((p) => ({ projectId: p.projectId, url: p.url, mode: p.mode, state: p.state })),
@@ -804,6 +804,11 @@ export class SleepPilotApp extends EventEmitter {
     // blocking on optional tool downloads or model calls.
     const scout = await this.scout.project(project.dir, { inspection: project.inspection }).catch(() => null);
     run.scout = scout ? { primary: scout.primary, summary: scout.summary, stacks: scout.stacks.map((s) => s.id), checks: scout.checks.length, risks: scout.risks } : null;
+    // An office project gets the office check from the first iteration (side-effect free).
+    if (run.scout?.stacks.includes('office') && !(project.checks || []).some((c) => c.type === 'office')) {
+      project.checks = sanitizeChecks([...(project.checks || []), { id: 'office', type: 'office', name: 'Office files open and look right (Excel, Word, PDF, PNG …)', enabled: true, approved: true, auto: true, expect: [] }]);
+      await this.store.saveProject(project);
+    }
     run.engine = {
       id: engine.id,
       label: engine.label,
@@ -1132,7 +1137,7 @@ function decorateScout(scout, { scope = null, allTools = null, kind = scout.kind
 export function sanitizeChecks(list) {
   return (Array.isArray(list) ? list : []).slice(0, 30).map((c, i) => ({
     id: String(c.id || `custom-${i + 1}`).slice(0, 60),
-    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build', 'android-run'].includes(c.type) ? c.type : 'command',
+    type: ['command', 'html-smoke', 'js-syntax', 'py-syntax', 'cite-check', 'doc-check', 'cargo', 'android-build', 'android-run', 'office'].includes(c.type) ? c.type : 'command',
     name: String(c.name || c.command || c.cargo || 'Check').slice(0, 120),
     command: c.type === 'command' || !c.type ? String(c.command || '').slice(0, 1000) : undefined,
     cargo: c.type === 'cargo' ? ['check', 'test', 'build', 'clippy', 'fmt'].includes(String(c.cargo || '').split(/\s+/)[0]) ? String(c.cargo).slice(0, 100) : 'check' : undefined,
@@ -1145,12 +1150,27 @@ export function sanitizeChecks(list) {
     settleSec: c.type === 'android-run' ? num(c.settleSec, { min: 2, max: 120, allowNull: false }) ?? 8 : undefined,
     startEmulator: c.type === 'android-run' ? c.startEmulator !== false : undefined,
     variant: c.type === 'android-build' ? (c.variant === 'release' ? 'release' : 'debug') : undefined,
+    expect: c.type === 'office' ? sanitizeOfficeExpectations(c.expect) : undefined,
     enabled: !!c.enabled,
     approved: c.type === 'command' || !c.type ? !!c.approved : true,
     suggested: !!c.suggested,
     reason: c.reason ? String(c.reason).slice(0, 500) : undefined,
     timeoutSec: num(c.timeoutSec, { min: 5, max: 7200, allowNull: false }) ?? 600,
   }));
+}
+
+/** Office check expectations: plain JSON objects with a relative "file", capped in size. */
+export function sanitizeOfficeExpectations(raw) {
+  const list = (Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : []).filter((e) => e && typeof e === 'object' && typeof e.file === 'string' && e.file.trim());
+  const out = [];
+  for (const e of list.slice(0, 30)) {
+    const json = JSON.stringify(e);
+    if (json.length > 20_000) continue;
+    const copy = JSON.parse(json);
+    copy.file = String(copy.file).trim().replace(/\\/g, '/').slice(0, 400);
+    out.push(copy);
+  }
+  return out;
 }
 
 /** Crash info handed over by the supervisor (src/supervisor.mjs) to the restarted app. */

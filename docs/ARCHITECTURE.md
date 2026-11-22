@@ -30,7 +30,7 @@
  2.x       Code CLI   CLI        harness        Harness    harness
 ```
 
-Zero runtime dependencies: Node.js built-ins only (`fetch`, `node:test`, `node:http`, `node:child_process`).
+The core has no dependencies: Node.js built-ins only (`fetch`, `node:test`, `node:http`, `node:child_process`). The office tools (`src/office/`, see [OFFICE.md](OFFICE.md)) use npm libraries (ExcelJS, pdf.js, pdfmake, pdf-lib, docx, mammoth, PptxGenJS, ECharts, resvg …) that are loaded with `import()` only when an office feature runs: the office check, `sleeppilot office`, the office MCP server or the reviewer's preview of a changed office file.
 
 ## Engine layer
 

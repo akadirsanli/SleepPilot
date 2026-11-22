@@ -1,4 +1,4 @@
-# Dependencies / build output (SleepPilot has no runtime dependencies)
+# Dependencies / build output (installed by npm; only the office tools use them)
 node_modules/
 *.tgz
 target/

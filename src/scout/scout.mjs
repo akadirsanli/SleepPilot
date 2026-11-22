@@ -42,6 +42,12 @@ const EXT_LANG = {
   '.hpp': 'cpp', '.swift': 'swift', '.dart': 'dart', '.php': 'php', '.rb': 'ruby', '.lua': 'lua',
 };
 
+export const OFFICE_LIBS = {
+  node: ['exceljs', 'xlsx', 'xlsx-populate', 'pdf-lib', 'pdfkit', 'pdfmake', 'pdfjs-dist', 'pdf-parse', 'docx', 'mammoth', 'docxtemplater', 'pptxgenjs', 'papaparse', 'csv-parse', 'node-xlsx'],
+  python: ['openpyxl', 'pandas', 'xlsxwriter', 'xlrd', 'xlwings', 'python-docx', 'docxtpl', 'pdfplumber', 'pypdf', 'pypdf2', 'pdfminer.six', 'reportlab', 'fpdf', 'fpdf2', 'python-pptx', 'camelot-py', 'tabula-py', 'polars', 'duckdb'],
+  jvmDotnet: ['ClosedXML', 'EPPlus', 'NPOI', 'DocumentFormat.OpenXml', 'ExcelDataReader', 'iText', 'itext7', 'QuestPDF', 'PdfSharp', 'Aspose', 'Syncfusion.XlsIO', 'org.apache.poi', 'pdfbox'],
+};
+
 export async function scanProject(dir, { inspection = null } = {}) {
   const root = path.resolve(dir);
   const files = [];
@@ -173,6 +179,27 @@ export async function scanProject(dir, { inspection = null } = {}) {
   }
   if (manifestHas('pubspec.yaml') || extCounts.dart) {
     addStack('dart', 'Dart / Flutter', 0.9, 'pubspec.yaml or Dart sources');
+  }
+  // Office documents: a library that reads or writes Excel/Word/PDF/PowerPoint, or office data
+  // files in the project. The developer is then told about SleepPilot's office tools, and an
+  // office check (files open, no #REF!/NaN, expectations) is suggested.
+  {
+    const found = [];
+    const pkg = manifestHas('package.json') ? await readJson(path.join(root, manifestPath('package.json'))) : {};
+    const nodeDeps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+    found.push(...nodeDeps.filter((d) => OFFICE_LIBS.node.includes(d)));
+    const pyText = `${await readText(path.join(root, manifestPath('requirements.txt'))).catch(() => '')}\n${await readText(path.join(root, manifestPath('pyproject.toml'))).catch(() => '')}`.toLowerCase();
+    found.push(...OFFICE_LIBS.python.filter((l) => new RegExp(`(^|[\\s"'\\[,])${l.replace(/[-_]/g, '[-_]')}([\\s"'=<>~!;,\\]]|$)`, 'm').test(pyText)));
+    for (const f of manifests.filter((m) => /\.(csproj|fsproj|vbproj)$|(^|\/)(pom\.xml|build\.gradle(\.kts)?)$/i.test(m)).slice(0, 10)) {
+      const text = await readText(path.join(root, files.find((x) => x.toLowerCase() === f) || f)).catch(() => '');
+      found.push(...OFFICE_LIBS.jvmDotnet.filter((l) => text.toLowerCase().includes(l.toLowerCase())));
+    }
+    const officeFiles = files.filter((f) => /\.(xlsx|xlsm|xls|docx|doc|pptx)$/i.test(f) && !/(^|\/)(docs?|\.github)\//i.test(f));
+    if (found.length || officeFiles.length >= 2) {
+      const libs = [...new Set(found)];
+      frameworks.push(...libs);
+      addStack('office', 'Office documents (Excel / Word / PDF)', libs.length ? 0.9 : 0.6, libs.length ? `office libraries: ${libs.slice(0, 6).join(', ')}` : `${officeFiles.length} office file(s), e.g. ${officeFiles.slice(0, 3).join(', ')}`, { libraries: libs, officeFiles: officeFiles.length });
+    }
   }
   // A source-only project with no manifest still gets useful evidence from extensions.
   if (!stacks.length && Object.keys(extCounts).length) {

@@ -21,6 +21,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Office libraries
+        run: npm ci --no-audit --no-fund
       - name: Unit and integration tests (fake engines, no usage)
         run: node test/run.mjs
       - name: CLI smoke test

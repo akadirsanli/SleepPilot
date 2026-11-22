@@ -612,7 +612,20 @@ export function mcpSettingsHtml() {
   const m = WB.mcp;
   if (!m) return '<div class="empty"><span class="spinner"></span> Loading…</div>';
   const engineLabel = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
-  const row = (s, i) => `<div class="engine-card" data-mcp="${i}">
+  const builtinRow = (s, i) => `<div class="engine-card" data-mcp="${i}" data-builtin="${esc(s.builtin)}">
+    <div class="engine-head">
+      <label class="check" style="margin:0"><input type="checkbox" data-f="enabled" ${s.enabled ? 'checked' : ''}> <b>${esc(s.name)}</b></label>
+      <span class="badge badge-muted">built in</span>
+      <span class="hint">Excel, CSV, Word, PowerPoint, PDF, PNG: inspect, create, verify, compare, synthetic test data</span>
+      <span class="spacer"></span>
+      <button class="btn btn-small btn-ghost" data-act="mcpRemove" data-i="${i}">Remove</button>
+    </div>
+    <div class="grid grid-2" style="margin-top:8px">
+      <div><label>Who may use it</label><select data-f="roles"><option value="all" ${s.roles !== 'developer' ? 'selected' : ''}>All roles (manager and reviewer get the reading tools only)</option><option value="developer" ${s.roles === 'developer' ? 'selected' : ''}>Developer only</option></select></div>
+      <div class="row" style="align-items:flex-end">${['claude', 'codex'].map((id) => `<label class="check" style="margin:0"><input type="checkbox" data-engine="${id}" ${s.engines?.includes(id) ? 'checked' : ''}> ${esc(engineLabel[id])}</label>`).join('')}<span class="hint">OpenCode: the developer uses <span class="mono">sleeppilot office</span> instead.</span></div>
+    </div>
+  </div>`;
+  const row = (s, i) => (s.builtin ? builtinRow(s, i) : `<div class="engine-card" data-mcp="${i}">
     <div class="engine-head">
       <label class="check" style="margin:0"><input type="checkbox" data-f="enabled" ${s.enabled ? 'checked' : ''}> <b>${esc(s.name)}</b></label>
       <span class="hint mono">${esc(s.url || [s.command, ...(s.args || [])].join(' '))}</span>
@@ -627,7 +640,7 @@ export function mcpSettingsHtml() {
     <label>Environment variables it needs (names, comma-separated)</label>
     <input type="text" data-f="env" value="${esc((s.env || []).join(', '))}" placeholder="e.g. GITHUB_TOKEN">
     ${(s.env || []).length ? `<div class="hint">${s.env.map((n) => `${esc(n)}: ${m.envSet?.includes(n) ? '<span style="color:var(--ok)">set</span>' : `<span style="color:var(--warn)">not set</span> <a href="#" data-act="mcpSetEnv" data-name="${esc(n)}">set value…</a>`}`).join(' · ')}</div>` : ''}
-  </div>`;
+  </div>`);
   return `<div class="card flat">
     <div class="card-head"><h2>MCP servers for the agents</h2><span class="hint">Claude Code, Codex and OpenCode</span></div>
     <p class="sub" style="margin:0 0 10px">MCP servers give the coding agents extra tools: a real browser, current library documentation, GitHub and more. One list for all projects. Secrets (tokens) are stored in SleepPilot's credential file, never in the settings. Changes apply from the next agent turn; OpenCode restarts by itself when no run is active.</p>
@@ -646,6 +659,9 @@ function readMcpForm() {
   return [...document.querySelectorAll('[data-mcp]')].map((card) => {
     const i = Number(card.dataset.mcp);
     const prev = WB.mcp.servers[i] || {};
+    if (card.dataset.builtin) {
+      return { name: prev.name, builtin: card.dataset.builtin, enabled: card.querySelector('[data-f="enabled"]').checked, roles: card.querySelector('[data-f="roles"]').value, engines: [...card.querySelectorAll('[data-engine]')].filter((c) => c.checked).map((c) => c.dataset.engine), env: [] };
+    }
     const target = card.querySelector('[data-f="target"]').value.trim();
     const isUrl = /^https?:\/\//i.test(target);
     const parts = target.match(/"[^"]*"|\S+/g)?.map((p) => p.replace(/^"|"$/g, '')) || [];
@@ -664,7 +680,7 @@ Object.assign(WB_ACTIONS, {
   mcpAddPreset: async (el) => {
     const p = WB.mcp.presets.find((x) => x.id === el.dataset.id);
     if (!p) return;
-    WB.mcp.servers = [...readMcpForm(), { name: p.name, enabled: true, command: p.command, args: p.args, env: p.env, roles: p.roles, engines: WB.mcp.engines }];
+    WB.mcp.servers = [...readMcpForm(), p.builtin ? { name: p.name, enabled: true, builtin: p.builtin, env: [], roles: p.roles, engines: p.engines } : { name: p.name, enabled: true, command: p.command, args: p.args, env: p.env, roles: p.roles, engines: WB.mcp.engines }];
     rerender();
   },
   mcpAddCustom: async () => {

@@ -7,4 +7,6 @@ if ! command -v node >/dev/null 2>&1; then
   echo "SleepPilot: Node.js 20.10 or newer is required. Install it from https://nodejs.org" >&2
   exit 1
 fi
+# Office tools (Excel, Word, PDF): installs its libraries once; SleepPilot starts even if this fails.
+if [ "${1:-}" != "office" ] || [ "${2:-}" != "mcp" ]; then node scripts/ensure-deps.mjs >&2 || true; fi
 exec node src/main.mjs "$@"

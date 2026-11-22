@@ -20,7 +20,19 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rawArgs = process.argv.slice(2);
 const cliCommand = rawArgs[0] && !rawArgs[0].startsWith('-') ? rawArgs[0] : rawArgs[0] === '--version' ? 'version' : null;
 const CLI_COMMANDS = new Set(['run', 'ask', 'route', 'reverse', 'engines', 'doctor', 'web', 'help', 'version']);
-if (cliCommand && CLI_COMMANDS.has(cliCommand)) {
+if (cliCommand === 'office') {
+  // Office tools (Excel, CSV, Word, PowerPoint, PDF, PNG): standalone, no app state needed.
+  const { runOfficeCli } = await import('./office/cli.mjs');
+  const code = await runOfficeCli(rawArgs.slice(1)).catch((err) => {
+    process.stderr.write(`SleepPilot office: ${err.message}\n`);
+    return 1;
+  });
+  // (`office mcp` returns only when its input closes.) Let stdout drain, then leave: the desktop
+  // UI below must never start from an office command.
+  process.exitCode = code ?? 0;
+  await new Promise((r) => setTimeout(r, 50));
+  process.exit(code ?? 0);
+} else if (cliCommand && CLI_COMMANDS.has(cliCommand)) {
   process.env.SLEEPPILOT_QUIET = '1';
   const { runCli } = await import('./cli/index.mjs');
   const code = await runCli(cliCommand, rawArgs.slice(1));
@@ -54,6 +66,7 @@ Headless harness (same engines, no window):
   sleeppilot reverse   Prepare a Sleep & Reverse & Rust It workspace
   sleeppilot engines   Show engines, providers and toolchains
   sleeppilot doctor    Check the local setup
+  sleeppilot office    Excel / CSV / Word / PowerPoint / PDF / PNG tools and MCP server
   Run "sleeppilot help" for all options.
 
 Docs: README.md · docs/USAGE.md · docs/ENGINES.md · docs/REVERSE.md`);

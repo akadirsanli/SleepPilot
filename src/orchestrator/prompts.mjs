@@ -46,7 +46,28 @@ function inspectionBlock(insp) {
 function checksBlock(checks) {
   const enabled = (checks || []).filter((c) => c.enabled && (c.type !== 'command' || c.approved));
   if (!enabled.length) return 'No automated checks are configured. Work will be recorded as "implemented but not verified" unless the user adds checks.';
-  return enabled.map((c) => `- ${c.name}${c.command ? ` (\`${c.command}\`)` : ''}`).join('\n');
+  return enabled.map((c) => `- ${c.name}${c.command ? ` (\`${c.command}\`)` : ''}${c.type === 'office' && c.expect?.length ? `\n  Expectations (exact): ${JSON.stringify(c.expect).slice(0, 3000)}` : ''}`).join('\n');
+}
+
+/**
+ * Office tools for the developer: shown when the project works with Excel/Word/PDF files (Scout
+ * found an office library or office files, or an office check is configured).
+ */
+export function officeToolsBlock({ checks, scout, cliCommand }) {
+  const wanted = (checks || []).some((c) => c.type === 'office' && c.enabled) || (scout?.stacks || []).some((s) => s === 'office' || s?.id === 'office');
+  if (!wanted || !cliCommand) return '';
+  return `
+OFFICE TOOLS (Excel, CSV, Word, PowerPoint, PDF, PNG) — use them instead of guessing what a binary file contains:
+- Look at input data before writing code, and at every file your code produced:
+  ${cliCommand} inspect <file>          (sheets, column types/stats, first rows, problems)
+  ${cliCommand} table <file> --sheet S --limit 50   (rows as JSON)
+  ${cliCommand} text <file.docx|.pdf|.pptx>
+- Check your output the way SleepPilot will: ${cliCommand} verify <expectations.json>  (exit 1 on failure)
+- Compare with a reference: ${cliCommand} diff <a> <b>
+- Synthetic test data with planted anomalies (never use real personal data): ${cliCommand} sample sales|expenses|invoices --out data/x.xlsx
+  The app under test must NOT read the *.key.json answer key; only the check does.
+- If MCP tools named office_* are available to you, they do the same.
+`;
 }
 
 export function taskTable(tasks, { max = 40 } = {}) {
@@ -233,6 +254,7 @@ ${task.notes ? `Manager notes: ${task.notes}\n` : ''}${
 AFTER YOU FINISH, SLEEPPILOT WILL RUN THESE CHECKS:
 ${checksBlock(checks)}
 You may run them yourself if your permissions allow it.
+${officeToolsBlock({ checks, scout: opts.scout, cliCommand: opts.officeCli })}
 
 Keep each tool call and your answer reasonably small: write large files in several smaller edits rather than one huge write (very long outputs get truncated by the provider).
 When finished, reply with a short summary of what you changed (files and why) and how you checked it, then end with exactly one final line:
@@ -270,7 +292,10 @@ ${patchText || '(no diff available)'}
 CHECK RESULTS (executed by SleepPilot):
 ${(checks || []).map((c) => `- ${c.name}: ${c.status}${c.status !== 'passed' ? ` — ${String(c.output).slice(-600)}` : ''}${c.details?.screenshot ? ` (screenshot of the running app: ${c.details.screenshot} — open it with your file tool if the look matters)` : ''}`).join('\n') || '- none ran'}
 
-Judge whether the change satisfies the acceptance criteria, what is missing, and what evidence is missing.
+${opts.officeFiles ? `OFFICE FILES CHANGED (read by SleepPilot — binary files have no diff; this is what they contain):
+${opts.officeFiles}
+
+` : ''}Judge whether the change satisfies the acceptance criteria, what is missing, and what evidence is missing.
 ${opts.screenshotPages?.length ? `
 SCREENSHOTS (only if you need them): if you cannot judge the result without SEEING it (layout, visual design, a canvas or game screen, mobile view), add "screenshots": [{"page": "index.html", "device": "desktop | phone | tablet"}] (at most 3) to your JSON and use verdict "cannot_judge" for now. SleepPilot opens the pages in a real browser, saves the images and asks you once more. Do not ask when the diff and the checks are enough. Pages in the project: ${opts.screenshotPages.slice(0, 15).join(', ')}.
 ` : ''}

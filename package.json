@@ -1,7 +1,7 @@
 {
   "name": "sleeppilot",
-  "version": "2.6.1",
-  "description": "Autonomous engineering harness with OpenCode, Claude Code, Codex, OpenAI-compatible APIs, DeepSeek Harness and custom CLIs; Scout toolchain detection, evidence-based verification, a project workspace, live web preview, Android APK builds, multi-project runs, GitHub publishing and Sleep & Reverse & Rust It.",
+  "version": "2.7.0",
+  "description": "Autonomous engineering harness with OpenCode, Claude Code, Codex, OpenAI-compatible APIs, DeepSeek Harness and custom CLIs; Scout toolchain detection, evidence-based verification, a project workspace, live web preview, Android APK builds, multi-project runs, GitHub publishing, office document tools (Excel, CSV, Word, PowerPoint, PDF, charts) and Sleep & Reverse & Rust It.",
   "license": "MIT",
   "author": "akadirsanli",
   "type": "module",
@@ -21,12 +21,14 @@
     "node": ">=20.10"
   },
   "scripts": {
+    "prestart": "node scripts/ensure-deps.mjs",
     "start": "node src/main.mjs",
     "start:test-mode": "node src/main.mjs --test-mode",
     "test": "node test/run.mjs",
     "test:real": "node test/run.mjs real",
     "doctor": "node src/main.mjs doctor",
-    "engines": "node src/main.mjs engines --connect"
+    "engines": "node src/main.mjs engines --connect",
+    "office": "node src/main.mjs office"
   },
   "keywords": [
     "autonomous-agent",
@@ -46,7 +48,12 @@
     "live-preview",
     "github",
     "overnight",
-    "windows"
+    "windows",
+    "excel",
+    "xlsx",
+    "pdf",
+    "docx",
+    "office"
   ],
   "files": [
     "src/",
@@ -62,5 +69,20 @@
     "LICENSE",
     "SECURITY.md",
     "THIRD_PARTY.md"
-  ]
+  ],
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "docx": "^9.16.0",
+    "echarts": "^6.1.0",
+    "exceljs": "^4.4.0",
+    "iconv-lite": "^0.7.3",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "papaparse": "^5.7.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.5.438",
+    "pdfmake": "^0.3.15",
+    "pngjs": "^7.0.0",
+    "pptxgenjs": "^4.0.1"
+  }
 }

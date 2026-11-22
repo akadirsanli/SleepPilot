@@ -32,5 +32,7 @@ if exist "%~dp0SleepPilot.lnk" goto :start
 if not exist "%~dp0ui\icon.ico" goto :start
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%~dp0SleepPilot.lnk'); $s.TargetPath='%~dp0SleepPilot.cmd'; $s.WorkingDirectory='%~dp0'; $s.IconLocation='%~dp0ui\icon.ico,0'; $s.Description='SleepPilot - Plan. Build. Verify. Sleep.'; $s.Save()" >nul 2>nul
 :start
+rem Office tools (Excel, Word, PDF): installs its libraries once; SleepPilot starts even if this fails.
+node "%~dp0scripts\ensure-deps.mjs"
 node "%~dp0src\main.mjs" %*
 if errorlevel 1 pause

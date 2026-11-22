@@ -187,6 +187,11 @@ export async function runChecks({ projectDir, checks, changedFiles = [], command
         settle?.(result);
       } else if (check.type === 'android-run') {
         results.push(await runAndroidRunCheck({ check, projectDir, base, started }));
+      } else if (check.type === 'office') {
+        // Loaded on demand: the office libraries are large and most projects never need them.
+        const { runOfficeCheck } = await import('../office/check.mjs');
+        const r = await runOfficeCheck({ check, projectDir, changedFiles });
+        results.push({ ...base, ...r, output: tail(r.output, 8000), durationMs: Date.now() - started });
       } else {
         results.push({ ...base, status: 'skipped', output: `Unknown check type: ${check.type}`, durationMs: 0 });
       }

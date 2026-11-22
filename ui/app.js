@@ -693,6 +693,7 @@ function renderProject() {
         <input type="text" id="newCheckName" class="grow" placeholder="New command check name">
         <input type="text" id="newCheckCommand" class="grow" placeholder="e.g. cargo test">
         <button class="btn btn-small" data-act="addCheck">Add check</button>
+        <button class="btn btn-small" data-act="addOfficeCheck" title="Checks Excel, CSV, Word, PowerPoint, PDF and PNG outputs: every changed file must open cleanly, plus the expectations you write (sheets, columns, cell values, pages, headings, planted anomalies found …)">+ Office output check</button>
       </div>
       <div class="hint">Checks are the evidence: a task is only “verified” when an enabled check actually passed after the change.</div>
     </details>
@@ -779,6 +780,7 @@ function checksEditorHtml(checks) {
       <div class="grow">
         <label class="check" style="margin:0"><input type="checkbox" data-check-enabled="${esc(c.id)}" ${c.enabled ? 'checked' : ''}> <b>${esc(c.name)}</b> <span class="badge badge-muted">${esc(c.type)}</span></label>
         ${c.type === 'command' ? `<input type="text" data-check-command="${esc(c.id)}" value="${esc(c.command || '')}" placeholder="command">` : ''}
+        ${c.type === 'office' ? `<textarea data-check-expect="${esc(c.id)}" rows="${Math.min(14, 3 + JSON.stringify(c.expect || []).length / 70)}" spellcheck="false" class="mono" placeholder='[{"file": "out/rapor.xlsx", "sheets": ["Özet"], "columns": ["Tutar"], "minRows": 1, "noErrors": true}]'>${esc(JSON.stringify(c.expect || [], null, 2))}</textarea><div class="hint">Every changed office file must open cleanly. Expectations (JSON list): file, sheets, sheet, columns, minRows, maxRows, cells {"Özet!B2": 100}, noErrors, contains, notContains, pages, headings, slides, notBlank, sameAs, findsAll {key, column}. See docs/OFFICE.md.</div>` : ''}
         ${c.reason ? `<div class="hint">${esc(c.reason)}</div>` : ''}
       </div>
       <button class="btn btn-small btn-danger" data-act="removeCheck" data-id="${esc(c.id)}">Remove</button>
@@ -790,7 +792,19 @@ function readChecks() {
   return (S.project.checks || []).map((c) => {
     const enabled = $(`[data-check-enabled="${CSS.escape(c.id)}"]`)?.checked ?? c.enabled;
     const command = c.type === 'command' ? $(`[data-check-command="${CSS.escape(c.id)}"]`)?.value ?? c.command : c.command;
-    return { ...c, enabled: !!enabled, command };
+    let expect = c.expect;
+    const box = c.type === 'office' ? $(`[data-check-expect="${CSS.escape(c.id)}"]`) : null;
+    if (box) {
+      try {
+        const parsed = JSON.parse(box.value.trim() || '[]');
+        expect = Array.isArray(parsed) ? parsed : [parsed];
+        box.classList.remove('invalid');
+      } catch (err) {
+        box.classList.add('invalid');
+        toast(`Office check expectations are not valid JSON: ${err.message}`, true);
+      }
+    }
+    return { ...c, enabled: !!enabled, command, expect };
   });
 }
 
@@ -1813,7 +1827,7 @@ function appSettingsHtml() {
   return `<div class="card flat">
     <div class="card-head"><h2>Application</h2></div>
     <div class="kv">
-      <div>Version</div><div>${esc(S.state.app?.version || '2.6.1')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
+      <div>Version</div><div>${esc(S.state.app?.version || '2.7.0')}${S.state.app?.testMode ? ' (test mode)' : ''}</div>
       <div>Data folder</div><div class="mono mono-wrap">${esc(S.state.app?.dataRoot || S.state.appDataRoot || 'per-user application data')}</div>
       <div>Default engine</div><div>${esc(engineById(defaultEngineId())?.label || defaultEngineId())}</div>
       <div>Platform</div><div>${esc(S.state.app?.platform || '')} · ${esc(S.state.app?.arch || '')} · Node ${esc(S.state.app?.node || '')}</div>
@@ -2262,6 +2276,11 @@ const ACTIONS = {
     $('#checksEditor').innerHTML = checksEditorHtml(S.project.checks);
     $('#newCheckName').value = '';
     $('#newCheckCommand').value = '';
+  },
+  addOfficeCheck: () => {
+    if ((S.project.checks || []).some((c) => c.type === 'office')) return toast('This project already has an office check; add expectations to it.', true);
+    S.project.checks = [...readChecks(), { id: 'office', type: 'office', name: 'Office files open and look right (Excel, Word, PDF, PNG …)', enabled: true, approved: true, expect: [] }];
+    $('#checksEditor').innerHTML = checksEditorHtml(S.project.checks);
   },
   removeCheck: (el) => {
     S.project.checks = (S.project.checks || []).filter((c) => c.id !== el.dataset.id);

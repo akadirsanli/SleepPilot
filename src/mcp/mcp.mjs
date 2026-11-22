@@ -2,6 +2,10 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { dataRoot } from '../util/paths.mjs';
 import { registerSecret } from '../util/redact.mjs';
+import { fileURLToPath } from 'node:url';
+
+/** SleepPilot's own office tools as an MCP server (src/office/mcp-server.mjs). */
+export const OFFICE_CLI_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'office', 'cli.mjs');
 
 /**
  * MCP servers the coding agents may use (Settings → MCP). One list for all projects: OpenCode runs
@@ -23,6 +27,10 @@ export const MCP_ENGINES = ['claude', 'codex', 'opencode'];
 export const MCP_PRESETS = [
   { id: 'playwright', name: 'playwright', label: 'Playwright — drive a real browser (click, type, screenshot)', command: 'npx', args: ['-y', '@playwright/mcp@latest'], env: [], roles: 'all' },
   { id: 'context7', name: 'context7', label: 'Context7 — up-to-date library documentation', command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'], env: [], roles: 'all' },
+  // Built in: starts SleepPilot's own office server with this Node.js. Claude Code and Codex start
+  // MCP servers in the project folder, which is where the tools may write; OpenCode runs one shared
+  // server for all projects, so there the developer uses the `sleeppilot office` command instead.
+  { id: 'office', name: 'office', label: 'SleepPilot office tools — read, create and check Excel, CSV, Word, PowerPoint, PDF, PNG (built in)', builtin: 'office', env: [], roles: 'all', engines: ['claude', 'codex'] },
 ];
 
 const NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,39}$/;
@@ -37,6 +45,11 @@ export function sanitizeMcpSettings(raw = {}) {
     if (!NAME_RE.test(name) || seen.has(name)) continue;
     const url = String(s?.url || '').trim();
     const command = String(s?.command || '').trim();
+    if (s?.builtin === 'office') {
+      seen.add(name);
+      servers.push({ name, enabled: s?.enabled !== false, builtin: 'office', env: [], roles: s?.roles === 'developer' ? 'developer' : 'all', engines: (Array.isArray(s?.engines) ? s.engines : ['claude', 'codex']).filter((e) => e === 'claude' || e === 'codex') });
+      continue;
+    }
     if (!url && !command) continue;
     if (url && !/^https?:\/\/[^\s]+$/i.test(url)) continue;
     seen.add(name);
@@ -58,6 +71,11 @@ export function serversFor(settings, { engine, readOnly = false, getEnv = () => 
   for (const s of sanitizeMcpSettings(settings?.mcp).servers) {
     if (!s.enabled || !s.engines.includes(engine)) continue;
     if (readOnly && s.roles !== 'all') continue;
+    if (s.builtin === 'office') {
+      // Read-only roles (manager, reviewer) get the reading tools only.
+      out.push({ ...s, command: process.execPath, args: [OFFICE_CLI_FILE, 'mcp', ...(readOnly ? ['--read-only'] : [])], envValues: {} });
+      continue;
+    }
     const env = {};
     for (const name of s.env) {
       const v = getEnv(name);

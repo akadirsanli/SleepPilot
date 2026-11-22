@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.7.0 — office tools: Excel, CSV, Word, PowerPoint, PDF, PNG
+
+### Added
+
+- **Office tools** (`src/office/`, [docs/OFFICE.md](docs/OFFICE.md)) for building apps that work
+  with office files. Read, create, check and compare Excel (.xlsx/.xlsm), CSV/TSV, Word, PowerPoint,
+  PDF and PNG/JPEG files, including European data: legacy code pages and `;` CSVs, `1.234,56`
+  numbers, `dd.mm.yyyy` dates, and full Unicode text in PDFs and charts.
+- **Office check** (project → Checks → *+ Office output check*). Every office file a task created
+  or changed must open cleanly and show no sign of a bug (`#REF!`, `#DIV/0!`, `NaN`, `undefined`,
+  `[object Object]`, empty document). Your expectations must hold too: sheets, columns, row
+  counts, cell values (exact, approximate, contains, min/max, formula), text, PDF pages, Word
+  headings and tables, slides, image size, "not blank", "same as a reference file", and the share
+  of planted anomalies found. The check is added by itself the first time a task writes an
+  Excel/CSV/Word/PowerPoint/PDF file, and at the start of a run in an office project.
+- **Synthetic test data with an answer key.** `sleeppilot office sample sales | expenses |
+  invoices` writes realistic, fully fictitious sales, expense claims or customer invoices with
+  planted anomalies (duplicate receipts, sales outside opening hours, refunds split below an
+  approval threshold, staff selling to their own card, self-approval, split invoices, discounts
+  over the maximum, wrong overdue status …), the rules in plain English and the answer key. Ordinary records never match a rule by
+  accident (tested over many seeds), so an exact implementation scores 100% with no false
+  positives.
+- **Reports and charts.** Excel with formats, frozen filtered header, totals and chart images;
+  Word, PDF and PowerPoint from Markdown or a block spec (headings, tables, key-value boxes,
+  callouts, charts, images, classification label, page numbers); charts as PNG/SVG (Apache
+  ECharts). PDFs can be merged and pages copied.
+- **`sleeppilot office …` command** (inspect, table, text, create, verify, diff, sample, merge,
+  pages, convert, status, mcp) — usable by you, scripts, CI and any agent's shell.
+- **MCP server** (Settings → MCP → *SleepPilot office tools*): the same tools as `office_*` MCP
+  tools for Claude Code and Codex; read-only roles get the reading tools only.
+- **Scout** recognises office libraries (openpyxl, pandas, xlsxwriter, python-docx, pdfplumber,
+  exceljs, pdf-lib, ClosedXML, EPPlus, NPOI, Open XML SDK, POI, iText, QuestPDF …); the developer
+  is then told the exact commands for looking at and verifying office files.
+- **The reviewer sees office files.** Binary files have no diff; the reviewer now gets
+  SleepPilot's reading of every changed office file (sheets, first rows, column statistics, PDF
+  text, problems).
+- `doctor` reports whether the office tools are installed.
+
+### Changed
+
+- SleepPilot now has npm dependencies, used **only** by the office tools and loaded only when
+  they are used (licenses in THIRD_PARTY.md: MIT, BSD, Apache-2.0, MPL-2.0). The launchers and
+  `npm start` install them once; the rest of SleepPilot runs without them.
+
+### Fixed
+
+- **Recovery when OpenCode lost the session.** If, after a crash or restart,
+  OpenCode no longer knows the session of the last instruction (HTTP 404
+  `SessionNotFoundError`), recovery now treats the instruction as not delivered
+  and retries the task in a new session. Before, the whole run ended as an
+  unexpected error and the iteration stayed "running".
+- **Flaky crash-recovery test.** The fake OpenCode server saved its state only
+  every 100 ms, so a crash right after a session was created could bring the
+  restarted server back without it. It now saves every change before answering,
+  atomically, and the test waits for the "crashed" server to exit.
+
 ## 2.6.1 — no more browser windows piling up
 
 ### Fixed

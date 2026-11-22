@@ -323,6 +323,50 @@ test('crash mid-turn → restart → run recovered as paused → reconciled from
   }
 });
 
+test('crash mid-turn and the engine lost the session → recovery re-queues the task in a new session instead of failing the run', { timeout: 120_000 }, async () => {
+  const { project, home } = setupEnv('crash-lost', plan(task('Long task', ['write part1.txt half', 'slow 3000', 'write part2.txt full'])));
+  const app = await makeApp();
+  let runId;
+  let sessionID;
+  const p = await newProject(app, project, { settings: { reviewerEnabled: false } });
+  try {
+    const view = await app.startRun(p.id);
+    runId = view.id;
+    const ctrl = app.controllers.get(runId);
+    await waitFor(() => fs.existsSync(path.join(project, 'part1.txt')) && ctrl.run.activeTurn?.submittedAt, { label: 'turn in progress' });
+    ({ sessionID } = ctrl.run.activeTurn);
+    await ctrl.persist();
+  } finally {
+    await ctrl_kill(app);
+  }
+  // The engine comes back without the developer session (its records of it were lost).
+  const stateFile = path.join(home, 'fake-opencode-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  assert.ok(state.some((s) => s.id === sessionID), 'the fake persisted the session before the crash');
+  fs.writeFileSync(stateFile, JSON.stringify(state.filter((s) => s.id !== sessionID)));
+
+  const app2 = await makeApp();
+  try {
+    const ctrl2 = app2.controllers.get(runId);
+    assert.equal(ctrl2.run.state, 'paused');
+    const resumed = ctrl2.resume();
+    const run = await finished(app2, runId);
+    await resumed;
+    assert.equal(run.state, 'completed', JSON.stringify(run.stopReason));
+    assert.equal(run.iterations[0].status, 'not_submitted');
+    const retry = run.iterations.find((i) => i.n > 1 && i.taskTitle === 'Long task');
+    assert.ok(retry, 'the task was retried');
+    assert.match(retry.sessionID, /^ses/);
+    assert.notEqual(retry.sessionID, sessionID, 'the retry used a new session');
+    assert.ok(fs.existsSync(path.join(project, 'part2.txt')));
+    assert.ok(ctrl2.logBuffer.some((e) => e.kind === 'warning' && /no longer has session/.test(e.text)));
+    assert.ok(!ctrl2.logBuffer.some((e) => /Could not read .* during recovery/.test(e.text)));
+  } finally {
+    delete process.env.SLEEPPILOT_RECONNECT_MS;
+    await app2.shutdown();
+  }
+});
+
 /** Simulated crash: the old process can no longer write anything, and its OpenCode server dies. */
 async function ctrl_kill(app) {
   const deadStore = new Proxy({}, { get: () => async () => null });
@@ -333,7 +377,12 @@ async function ctrl_kill(app) {
   }
   process.env.SLEEPPILOT_RECONNECT_MS = '1000';
   app.adapter.client?.stopEvents();
+  // stop() only sends SIGKILL. Wait until the process is really gone, so the restarted server
+  // never runs (or reads the fake's state file) next to the "crashed" one.
+  const child = app.adapter.server?.child;
+  const exited = child && child.exitCode === null && child.signalCode === null ? new Promise((r) => child.once('exit', r)) : null;
   await app.adapter.server?.stop();
+  await exited;
   await app.adapter.disconnect().catch(() => {});
   app.adapter.setStatus('disconnected', 'crashed (test)');
 }

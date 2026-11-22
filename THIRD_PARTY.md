@@ -1,6 +1,29 @@
 # Reused components, tools and ideas
 
-SleepPilot contains **no copied third-party source code** and installs **no npm packages**. Everything under `src/`, `ui/`, `test/` and `docs/` was written for this project. The parsers (PE/ELF/Mach-O/ZIP), the API clients, the engine loop and the UI are original and dependency-free.
+SleepPilot contains **no copied third-party source code**. Everything under `src/`, `ui/`, `test/` and `docs/` was written for this project. The parsers (PE/ELF/Mach-O/ZIP), the API clients, the engine loop and the UI are original and dependency-free.
+
+Since 2.7 the **office tools** (`src/office/`) use the npm packages below. They are installed by `npm install` (the launchers run it once on first start) and loaded only when an office feature is used, so the rest of SleepPilot works without them. All licenses allow commercial use; none is copyleft except MPL-2.0 (file-level: it applies only to resvg's own files, which SleepPilot does not modify).
+
+## npm packages (office tools)
+
+| Package | Used for | License |
+|---|---|---|
+| [exceljs](https://github.com/exceljs/exceljs) | Read/write .xlsx (styles, formulas, images) | MIT |
+| [papaparse](https://github.com/mholt/PapaParse) | CSV parsing (delimiter detection) | MIT |
+| [iconv-lite](https://github.com/ashtuchkin/iconv-lite) | Windows-1254 / ISO-8859-9 text | MIT |
+| [pdfjs-dist](https://github.com/mozilla/pdf.js) (Mozilla pdf.js) | PDF text extraction | Apache-2.0 |
+| [pdfmake](https://github.com/bpampuch/pdfmake) (with pdfkit) | PDF reports | MIT |
+| Roboto font (shipped inside pdfmake) | PDF and chart text (accented and non-English letters) | Apache-2.0 |
+| [pdf-lib](https://github.com/Hopding/pdf-lib) | PDF merge / page extraction | MIT |
+| [docx](https://github.com/dolanmiu/docx) | Write .docx | MIT |
+| [mammoth](https://github.com/mwilliamson/mammoth.js) | Read .docx | BSD-2-Clause |
+| [pptxgenjs](https://github.com/gitbrent/PptxGenJS) | Write .pptx | MIT |
+| [jszip](https://github.com/Stuk/jszip) | Read .pptx | MIT (dual MIT / GPL-3.0; used under MIT) |
+| [pngjs](https://github.com/pngjs/pngjs) | PNG pixels (blank detection, image diff) | MIT |
+| [Apache ECharts](https://github.com/apache/echarts) | Charts rendered to SVG on the server | Apache-2.0 |
+| [@resvg/resvg-js](https://github.com/yisibl/resvg-js) | Chart SVG → PNG | MPL-2.0 |
+
+Their own dependencies are listed in `package-lock.json`; each package's license file is in `node_modules/<package>/`. LibreOffice (optional, MPL-2.0) is only invoked as a separate program by `sleeppilot office convert`.
 
 ## External programs used at runtime (installed by the user, not redistributed)
 

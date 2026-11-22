@@ -14,9 +14,9 @@ import { rustStatus } from '../reverse/rust.mjs';
 import { REVERSE_MODES } from '../reverse/playbook.mjs';
 import { dataRoot } from '../util/paths.mjs';
 
-const VERSION = '2.6.1';
+const VERSION = '2.7.0';
 
-export const CLI_COMMANDS = ['run', 'ask', 'route', 'reverse', 'engines', 'doctor', 'web', 'help', 'version'];
+export const CLI_COMMANDS = ['run', 'ask', 'route', 'reverse', 'engines', 'doctor', 'office', 'web', 'help', 'version'];
 
 export function cliHelp() {
   return `SleepPilot ${VERSION} — autonomous engineering harness
@@ -29,6 +29,7 @@ USAGE
   sleeppilot reverse [options]       Prepare a Sleep & Reverse & Rust It workspace
   sleeppilot engines [options]       Show engine/provider/toolchain status
   sleeppilot doctor [--json]         Check this machine's setup
+  sleeppilot office <command>        Excel/CSV/Word/PowerPoint/PDF/PNG tools ("sleeppilot office help")
   sleeppilot web [--port N]          Start the UI server without opening a window
   sleeppilot version | --version
 
@@ -377,6 +378,9 @@ async function cmdDoctor(args) {
   add('Claude Code CLI', !!claude.found, claude.found ? `${claude.path} (${claude.version})` : 'not found (optional)');
   const codex = await findExternalCli({ candidates: ['codex', 'codex.cmd', '%APPDATA%\\npm\\codex.cmd'], versionArgs: ['--version'] });
   add('Codex CLI', !!codex.found, codex.found ? `${codex.path} (${codex.version})` : 'not found (optional)');
+  const { officeStatus } = await import('../office/deps.mjs');
+  const office = officeStatus();
+  add('Office tools', office.ready, office.ready ? `${office.packages.length} libraries (Excel, CSV, Word, PowerPoint, PDF, charts)` : `missing ${office.missing.join(', ')} — run: ${office.fix}`);
   const app = await makeApp({ autoConnect: false });
   try {
     const view = app.manager.view();
@@ -389,7 +393,7 @@ async function cmdDoctor(args) {
   else {
     for (const c of checks) console.log(`${c.ok ? 'OK  ' : 'FAIL'}  ${c.name}: ${c.detail}`);
   }
-  const optional = new Set(['OpenCode', 'Claude Code CLI', 'Codex CLI', 'DeepSeek Harness CLI', 'Rust toolchain', 'API providers']);
+  const optional = new Set(['OpenCode', 'Claude Code CLI', 'Codex CLI', 'DeepSeek Harness CLI', 'Rust toolchain', 'API providers', 'Office tools']);
   return checks.every((c) => c.ok || optional.has(c.name)) ? 0 : 1;
 }
 

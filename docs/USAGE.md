@@ -227,6 +227,7 @@ sleeppilot route [options]              resolve harness/model routing without ex
 sleeppilot reverse [options]            prepare a Reverse & Rust workspace
 sleeppilot engines [--connect] [--json] show engine/provider/toolchain status
 sleeppilot doctor [--json]              check the machine setup
+sleeppilot office <command>             Excel/CSV/Word/PowerPoint/PDF/PNG tools (docs/OFFICE.md)
 sleeppilot web [--port N]               start the UI server without a window
 sleeppilot help | version
 ```
